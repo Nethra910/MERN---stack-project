@@ -2,40 +2,134 @@ import express from 'express';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import authRoutes from './routes/authRoutes.js';
+import errorHandler from './middleware/errorMiddleware.js';
 
 dotenv.config();
 
 const app = express();
 
-// ✅ Manual CORS — works with ALL Express versions
-app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', 'http://localhost:5173');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+// ─── Body Parser ─────────────────────────────
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-  // Handle preflight
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
+// ─── CORS Configuration ─────────────────────
+app.use((req, res, next) => {
+  const allowedOrigins = [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    process.env.CLIENT_URL,
+  ].filter(Boolean);
+
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
   }
+
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
 
   next();
 });
 
-app.use(express.json());
+// ─── Request Logging (Development) ─────────
+if (process.env.NODE_ENV === 'development') {
+  app.use((req, res, next) => {
+    console.log(`${req.method} ${req.path}`);
+    next();
+  });
+}
+
+// ─── Health Check ───────────────────────────
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Auth API is running',
+    version: '1.0.0',
+  });
+});
+
+// ─── API Routes ─────────────────────────────
 app.use('/api/auth', authRoutes);
 
-console.log('🔄 Attempting MongoDB connection...');
-console.log('📌 MONGO_URI:', process.env.MONGO_URI);
+// ─── 404 Handler (Catch-All) ───────────────
 
-mongoose.connect(process.env.MONGO_URI)
+// ❌ This crashes in Express v5
+// app.use('*', (req, res) => { ... });
+
+// ✅ Correct for Express v5
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: `Route ${req.originalUrl} not found`,
+  });
+});
+
+// ─── Error Handler (Last Middleware) ───────
+app.use(errorHandler);
+
+// ─── Database & Server ─────────────────────
+const PORT = process.env.PORT || 5001;
+const MONGO_URI = process.env.MONGO_URI;
+
+if (!MONGO_URI) {
+  console.error('❌ MONGO_URI is not defined in environment variables');
+  process.exit(1);
+}
+
+if (!process.env.JWT_SECRET) {
+  console.error('❌ JWT_SECRET is not defined in environment variables');
+  process.exit(1);
+}
+
+if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+  console.warn('⚠️ EMAIL_USER or EMAIL_PASS not set. Email functionality will not work.');
+}
+
+console.log('🔄 Connecting to MongoDB...');
+console.log('📌 MONGO_URI:', MONGO_URI.replace(/\/\/.*@/, '//***:***@'));
+
+mongoose
+  .connect(MONGO_URI)
   .then(() => {
-    console.log('✅ MongoDB Connected');
-    app.listen(process.env.PORT || 5000, () =>
-      console.log(`🚀 Server running on port ${process.env.PORT || 5000}`)
-    );
+    console.log('✅ MongoDB Connected Successfully');
+    console.log(`📦 Database: ${mongoose.connection.name}`);
+
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`🔗 API: http://localhost:${PORT}/api`);
+      console.log(`📧 Client URL: ${process.env.CLIENT_URL || 'Not set'}`);
+    });
   })
   .catch((err) => {
     console.error('❌ MongoDB Connection Failed!');
     console.error('🔴 Error:', err.message);
+    process.exit(1);
   });
+
+// ─── Handle Unhandled Rejections & Exceptions ─
+process.on('unhandledRejection', (err) => {
+  console.error('❌ Unhandled Promise Rejection:', err);
+  console.log('🔄 Shutting down server...');
+  process.exit(1);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('❌ Uncaught Exception:', err);
+  console.log('🔄 Shutting down server...');
+  process.exit(1);
+});
+
+// ─── Graceful Shutdown ──────────────────────
+process.on('SIGTERM', () => {
+  console.log('👋 SIGTERM received. Shutting down gracefully...');
+  mongoose.connection.close(() => {
+    console.log('✅ MongoDB connection closed');
+    process.exit(0);
+  });
+});
+
+export default app;
