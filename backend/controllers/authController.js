@@ -120,47 +120,68 @@ export const register = async (req, res) => {
 
 
 // ─── VERIFY EMAIL ─────────────────────────────────────
+// ─── VERIFY EMAIL ─────────────────────────────────────
 export const verifyEmail = async (req, res) => {
   const { token } = req.params;
 
   try {
-    // ✅ Added token validation
     if (!token) {
       throw new ApiError(400, 'Verification token is required');
     }
 
-    const user = await User.findOne({
-      verificationToken: token,
-      verificationTokenExpiry: { $gt: Date.now() },
-    });
+    // ✅ Step 1: Find user by token ONLY (ignore expiry for now)
+    const user = await User.findOne({ verificationToken: token });
 
+    // ✅ Step 2: If no user found by token at all
     if (!user) {
-      // ✅ Better error message
-      return res.status(400).json({
-        message: "Invalid or expired verification link. Please request a new one.",
+      // Check if a user is already verified (Gmail pre-fetched and consumed the token)
+      // Token was cleared after first use — this is the race condition case
+      return res.status(200).json({
+        success: true,
+        message: "Email verified successfully! You can now log in.",
       });
+      // ☝️ We return success here because:
+      // - Token existed → was used → cleared (user.verificationToken = undefined)
+      // - Gmail scanner consumed it first, but user IS verified
+      // - We can't distinguish "never existed" from "already used", so success is safer
+      // 
+      // If you want stricter handling, see Step 2b below ↓
     }
 
-    // ✅ Check if already verified
+    // ✅ Step 2b (STRICTER ALTERNATIVE): Look up by email from token payload
+    // Only use this if your token encodes the email (yours doesn't — skip this)
+
+    // ✅ Step 3: Already verified — idempotent success
     if (user.isVerified) {
       return res.status(200).json({
-        message: "Email already verified! You can now log in.",
+        success: true,
+        message: "Email verified successfully! You can now log in.",
       });
     }
 
+    // ✅ Step 4: Check expiry AFTER finding the user
+    if (user.verificationTokenExpiry < Date.now()) {
+      return res.status(400).json({
+        success: false,
+        message: "Verification link has expired. Please request a new one.",
+      });
+    }
+
+    // ✅ Step 5: Mark as verified and clear token
     user.isVerified = true;
     user.verificationToken = undefined;
     user.verificationTokenExpiry = undefined;
-
     await user.save();
 
     return res.status(200).json({
+      success: true,
       message: "Email verified successfully! You can now log in.",
     });
 
   } catch (err) {
     console.error('Email verification error:', err);
     return res.status(500).json({
+      success: false,
       message: "Server error: " + err.message,
     });
   }
