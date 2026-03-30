@@ -174,7 +174,8 @@ export const searchUsers = async (req, res) => {
       return res.json({ success: true, data: [] });
     }
 
-    const regex = new RegExp(q.trim(), 'i');
+    const escaped = q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(escaped, 'i');
     const users = await User.find({
       _id: { $ne: req.user._id },
       isVerified: true,

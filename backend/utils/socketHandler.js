@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
+import Conversation from '../models/Conversation.js';
 
 const onlineUsers = new Map(); // userId -> socketId
 
@@ -31,9 +32,19 @@ export const setupSocket = (io) => {
     // Send current online users to newly connected user
     socket.emit('users:online', Array.from(onlineUsers.keys()));
 
-    // Join conversation room
-    socket.on('conversation:join', (conversationId) => {
-      socket.join(conversationId);
+    // Join conversation room - verify user is a participant first
+    socket.on('conversation:join', async (conversationId) => {
+      try {
+        const conversation = await Conversation.findOne({
+          _id: conversationId,
+          participants: socket.user._id,
+        });
+        if (conversation) {
+          socket.join(conversationId);
+        }
+      } catch {
+        // Ignore invalid join attempts
+      }
     });
 
     // Leave conversation room
