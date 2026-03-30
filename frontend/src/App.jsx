@@ -4,6 +4,7 @@ import Login from './pages/Login';
 import VerifyEmail from './pages/VerifyEmail';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
+import Dashboard from './pages/Dashboard';
 
 // ✅ Protected route component
 const ProtectedRoute = ({ children }) => {
@@ -52,22 +53,7 @@ export default function App() {
           path="/dashboard"
           element={
             <ProtectedRoute>
-              <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
-                <div className="bg-white p-8 rounded-2xl shadow-xl">
-                  <h1 className="text-3xl font-bold text-gray-800 mb-4">🎉 Welcome to Dashboard!</h1>
-                  <p className="text-gray-600 mb-6">You are successfully logged in.</p>
-                  <button
-                    onClick={() => {
-                      localStorage.removeItem('token');
-                      localStorage.removeItem('user');
-                      window.location.href = '/login';
-                    }}
-                    className="bg-red-600 text-white px-6 py-2 rounded-lg hover:bg-red-700 transition font-semibold"
-                  >
-                    Logout
-                  </button>
-                </div>
-              </div>
+              <Dashboard />
             </ProtectedRoute>
           }
         />

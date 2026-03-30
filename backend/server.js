@@ -1,12 +1,32 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
 import authRoutes from './routes/authRoutes.js';
+import chatRoutes from './routes/chatRoutes.js';
 import errorHandler from './middleware/errorMiddleware.js';
+import { setupSocket } from './utils/socketHandler.js';
 
 dotenv.config();
 
 const app = express();
+const httpServer = createServer(app);
+
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  process.env.CLIENT_URL,
+].filter(Boolean);
+
+const io = new Server(httpServer, {
+  cors: {
+    origin: allowedOrigins,
+    credentials: true,
+  },
+});
+
+setupSocket(io);
 
 // ─── Body Parser ─────────────────────────────
 app.use(express.json({ limit: '10mb' }));
@@ -14,12 +34,6 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // ─── CORS Configuration ─────────────────────
 app.use((req, res, next) => {
-  const allowedOrigins = [
-    'http://localhost:5173',
-    'http://localhost:3000',
-    process.env.CLIENT_URL,
-  ].filter(Boolean);
-
   const origin = req.headers.origin;
   if (allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
@@ -53,13 +67,9 @@ app.get('/', (req, res) => {
 
 // ─── API Routes ─────────────────────────────
 app.use('/api/auth', authRoutes);
+app.use('/api/chat', chatRoutes);
 
 // ─── 404 Handler (Catch-All) ───────────────
-
-// ❌ This crashes in Express v5
-// app.use('*', (req, res) => { ... });
-
-// ✅ Correct for Express v5
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -97,7 +107,7 @@ mongoose
     console.log('✅ MongoDB Connected Successfully');
     console.log(`📦 Database: ${mongoose.connection.name}`);
 
-    app.listen(PORT, () => {
+    httpServer.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`🔗 API: http://localhost:${PORT}/api`);
