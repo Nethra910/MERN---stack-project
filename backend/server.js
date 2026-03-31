@@ -1,18 +1,39 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
 import authRoutes from './routes/authRoutes.js';
+import chatRoutes from './routes/chatRoutes.js';
 import errorHandler from './middleware/errorMiddleware.js';
+import { initializeSocket } from './utils/socketHandler.js';
 
 dotenv.config();
 
 const app = express();
+const server = createServer(app);
 
-// ─── Body Parser ─────────────────────────────
+// ✅ Socket.IO Configuration
+const io = new Server(server, {
+  cors: {
+    origin: [
+      'http://localhost:5173',
+      'http://localhost:3000',
+      process.env.CLIENT_URL,
+    ].filter(Boolean),
+    credentials: true,
+  },
+  transports: ['websocket', 'polling'],
+});
+
+// ✅ Initialize Socket handlers
+initializeSocket(io);
+
+// Middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// ─── CORS Configuration ─────────────────────
+// CORS Setup
 app.use((req, res, next) => {
   const allowedOrigins = [
     'http://localhost:5173',
@@ -30,11 +51,10 @@ app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
 
   if (req.method === 'OPTIONS') return res.sendStatus(200);
-
   next();
 });
 
-// ─── Request Logging (Development) ─────────
+// Request Logging (Development)
 if (process.env.NODE_ENV === 'development') {
   app.use((req, res, next) => {
     console.log(`${req.method} ${req.path}`);
@@ -42,24 +62,20 @@ if (process.env.NODE_ENV === 'development') {
   });
 }
 
-// ─── Health Check ───────────────────────────
+// Health Check
 app.get('/', (req, res) => {
   res.json({
     success: true,
-    message: 'Auth API is running',
+    message: 'Auth & Chat API is running',
     version: '1.0.0',
   });
 });
 
-// ─── API Routes ─────────────────────────────
+// API Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/chat', chatRoutes);
 
-// ─── 404 Handler (Catch-All) ───────────────
-
-// ❌ This crashes in Express v5
-// app.use('*', (req, res) => { ... });
-
-// ✅ Correct for Express v5
+// 404 Handler
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -67,10 +83,10 @@ app.use((req, res) => {
   });
 });
 
-// ─── Error Handler (Last Middleware) ───────
+// Error Handler
 app.use(errorHandler);
 
-// ─── Database & Server ─────────────────────
+// Database & Server
 const PORT = process.env.PORT || 5001;
 const MONGO_URI = process.env.MONGO_URI;
 
@@ -84,10 +100,6 @@ if (!process.env.JWT_SECRET) {
   process.exit(1);
 }
 
-if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-  console.warn('⚠️ EMAIL_USER or EMAIL_PASS not set. Email functionality will not work.');
-}
-
 console.log('🔄 Connecting to MongoDB...');
 console.log('📌 MONGO_URI:', MONGO_URI.replace(/\/\/.*@/, '//***:***@'));
 
@@ -97,10 +109,11 @@ mongoose
     console.log('✅ MongoDB Connected Successfully');
     console.log(`📦 Database: ${mongoose.connection.name}`);
 
-    app.listen(PORT, () => {
+    server.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`🔗 API: http://localhost:${PORT}/api`);
+      console.log(`💬 WebSocket: ws://localhost:${PORT}`);
       console.log(`📧 Client URL: ${process.env.CLIENT_URL || 'Not set'}`);
     });
   })
@@ -110,7 +123,7 @@ mongoose
     process.exit(1);
   });
 
-// ─── Handle Unhandled Rejections & Exceptions ─
+// Handle Unhandled Rejections & Exceptions
 process.on('unhandledRejection', (err) => {
   console.error('❌ Unhandled Promise Rejection:', err);
   console.log('🔄 Shutting down server...');
@@ -123,7 +136,7 @@ process.on('uncaughtException', (err) => {
   process.exit(1);
 });
 
-// ─── Graceful Shutdown ──────────────────────
+// Graceful Shutdown
 process.on('SIGTERM', () => {
   console.log('👋 SIGTERM received. Shutting down gracefully...');
   mongoose.connection.close(() => {
@@ -133,3 +146,4 @@ process.on('SIGTERM', () => {
 });
 
 export default app;
+export { io };
