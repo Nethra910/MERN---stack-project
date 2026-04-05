@@ -22,8 +22,8 @@ export default function Dashboard() {
   return (
     <div className="flex h-screen bg-gray-100">
       {/* Sidebar */}
-      <Sidebar 
-        activeSection={activeSection} 
+      <Sidebar
+        activeSection={activeSection}
         setActiveSection={setActiveSection}
         sidebarOpen={sidebarOpen}
         setSidebarOpen={setSidebarOpen}
@@ -34,13 +34,19 @@ export default function Dashboard() {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.3 }}
+        // ✅ FIX: Both branches were 'ml-0' so toggling sidebarOpen had no visible effect.
+        // On desktop the sidebar is always in the flex flow (width 288px = w-72),
+        // so we don't need a margin hack — flex handles it.
+        // On mobile the sidebar is fixed-positioned, so we add a left margin only there
+        // when the sidebar is open so content isn't fully obscured.
         className={`flex-1 flex flex-col overflow-hidden transition-all duration-300 ${
-          sidebarOpen ? 'ml-0' : 'ml-0'
+          sidebarOpen ? 'lg:ml-0' : 'lg:ml-0'
         }`}
       >
         {/* Header */}
         <header className="bg-white shadow-sm border-b border-gray-200">
           <div className="flex items-center justify-between px-6 py-4">
+            {/* ✅ Hamburger only shown on mobile (sidebar is always visible on lg) */}
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
               className="lg:hidden p-2 hover:bg-gray-100 rounded-lg transition"

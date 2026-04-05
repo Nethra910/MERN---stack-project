@@ -3,20 +3,17 @@ import Message from '../models/Message.js';
 import User from '../models/User.js';
 import ApiError from '../utils/ApiError.js';
 import ApiResponse from '../utils/ApiResponse.js';
+import { sanitizeInput } from '../utils/validators.js';
 
-// ✅ Helper - Safe ObjectId comparison
-const isParticipant = (participants, userId) => {
-  return participants.some(id => id.equals(userId));
-};
+// ─── Helper ────────────────────────────────────────────
+const isParticipant = (participants, userId) =>
+  participants.some((id) => id.equals(userId));
 
 // ─── Get all conversations for user ────────────────────
 export const getConversations = async (req, res) => {
   try {
     const userId = req.user._id;
-
-    const conversations = await Conversation.find({
-      participants: userId,
-    })
+    const conversations = await Conversation.find({ participants: userId })
       .populate('participants', '-password')
       .populate('lastMessageSenderId', 'name')
       .sort({ lastMessageTime: -1 })
@@ -26,7 +23,6 @@ export const getConversations = async (req, res) => {
       new ApiResponse(200, 'Conversations fetched successfully', conversations)
     );
   } catch (err) {
-    console.error('❌ Get conversations error:', err);
     return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
   }
 };
@@ -37,28 +33,18 @@ export const createConversation = async (req, res) => {
     const userId = req.user._id;
     const { participantIds, isGroup, groupName, description } = req.body;
 
-    // ✅ Validation
-    if (!participantIds || participantIds.length === 0) {
+    if (!participantIds || participantIds.length === 0)
       throw new ApiError(400, 'Participant IDs are required');
-    }
 
-    // ─── GROUP CHAT ───
     if (isGroup) {
-      if (!groupName || groupName.trim().length === 0) {
-        throw new ApiError(400, 'Group name is required for group chats');
-      }
-
-      if (participantIds.length < 2) {
-        throw new ApiError(400, 'At least 2 participants are required for group chat');
-      }
+      if (!groupName?.trim()) throw new ApiError(400, 'Group name is required');
+      if (participantIds.length < 2)
+        throw new ApiError(400, 'At least 2 participants required for group');
 
       const allParticipants = [userId, ...participantIds];
-
-      // ✅ Verify all participants exist
       const users = await User.find({ _id: { $in: allParticipants } });
-      if (users.length !== allParticipants.length) {
+      if (users.length !== allParticipants.length)
         throw new ApiError(400, 'Some participants do not exist');
-      }
 
       const conversation = await Conversation.create({
         participants: allParticipants,
@@ -67,412 +53,491 @@ export const createConversation = async (req, res) => {
         groupAdmin: userId,
         description: description?.trim() || null,
       });
-
       await conversation.populate('participants', '-password');
 
       return res.status(201).json(
-        new ApiResponse(201, 'Group conversation created successfully', conversation)
+        new ApiResponse(201, 'Group conversation created', conversation)
       );
     }
 
-    // ─── ONE-TO-ONE CHAT ───
-    if (participantIds.length !== 1) {
-      throw new ApiError(400, 'One participant ID is required for one-to-one chat');
-    }
+    if (participantIds.length !== 1)
+      throw new ApiError(400, 'One participant ID required for 1-to-1 chat');
 
     const otherUserId = participantIds[0];
-
-    // ✅ Verify other user exists
     const otherUser = await User.findById(otherUserId);
-    if (!otherUser) {
-      throw new ApiError(400, 'Participant does not exist');
-    }
+    if (!otherUser) throw new ApiError(400, 'Participant does not exist');
 
-    // ✅ Check if conversation already exists
     let conversation = await Conversation.findOne({
       isGroup: false,
       participants: { $all: [userId, otherUserId] },
     }).populate('participants', '-password');
 
-    if (conversation) {
-      return res.status(200).json(
-        new ApiResponse(200, 'Conversation already exists', conversation)
-      );
-    }
+    if (conversation)
+      return res.status(200).json(new ApiResponse(200, 'Conversation already exists', conversation));
 
-    // ✅ Create new conversation
     conversation = await Conversation.create({
       participants: [userId, otherUserId],
       isGroup: false,
     });
-
     await conversation.populate('participants', '-password');
 
-    return res.status(201).json(
-      new ApiResponse(201, 'Conversation created successfully', conversation)
-    );
+    return res.status(201).json(new ApiResponse(201, 'Conversation created', conversation));
   } catch (err) {
-    console.error('❌ Create conversation error:', err);
-    if (err instanceof ApiError) {
+    if (err instanceof ApiError)
       return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
-    }
     return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
   }
 };
 
-// ─── Get messages in conversation ──────────────────────
+// ─── Get messages ──────────────────────────────────────
 export const getMessages = async (req, res) => {
   try {
     const { conversationId } = req.params;
     const userId = req.user._id;
     const { limit = 50, skip = 0 } = req.query;
 
-    // ✅ Validate conversation ID
-    if (!conversationId) {
-      throw new ApiError(400, 'Conversation ID is required');
-    }
-
-    // ✅ Check if user is participant
     const conversation = await Conversation.findById(conversationId);
-    if (!conversation) {
-      throw new ApiError(404, 'Conversation not found');
-    }
+    if (!conversation) throw new ApiError(404, 'Conversation not found');
+    if (!isParticipant(conversation.participants, userId))
+      throw new ApiError(403, 'Not a participant');
 
-    if (!isParticipant(conversation.participants, userId)) {
-      throw new ApiError(403, 'You are not a participant in this conversation');
-    }
-
-    // ✅ Fetch messages - SORTED CORRECTLY
     const messages = await Message.find({ conversationId })
       .populate('senderId', '-password')
-      .sort({ createdAt: 1 }) // ✅ Ascending (oldest first)
+      .populate('replyTo')                          // ← populate reply preview
+      .sort({ createdAt: 1 })
       .limit(parseInt(limit))
       .skip(parseInt(skip))
       .lean();
 
-    const totalMessages = await Message.countDocuments({ conversationId });
+    const total = await Message.countDocuments({ conversationId });
 
     return res.status(200).json(
-      new ApiResponse(200, 'Messages fetched successfully', {
-        messages,
-        total: totalMessages,
-        limit: parseInt(limit),
-        skip: parseInt(skip),
-      })
+      new ApiResponse(200, 'Messages fetched', { messages, total, limit: parseInt(limit), skip: parseInt(skip) })
     );
   } catch (err) {
-    console.error('❌ Get messages error:', err);
-    if (err instanceof ApiError) {
+    if (err instanceof ApiError)
       return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
-    }
     return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
   }
 };
 
-// ─── Send message ─────────────────────────────────────
+// ─── Send message ──────────────────────────────────────
 export const sendMessage = async (req, res) => {
   try {
     const { conversationId } = req.params;
-    const { content } = req.body;
+    const { content, replyToId } = req.body;
     const userId = req.user._id;
 
-    // ✅ Validation
-    if (!conversationId) {
-      throw new ApiError(400, 'Conversation ID is required');
+    if (!content?.trim()) throw new ApiError(400, 'Message content is required');
+
+    // Sanitize and validate message content
+    const sanitizedContent = sanitizeInput(content.trim());
+    
+    // Limit message length to prevent abuse
+    if (sanitizedContent.length > 5000) {
+      throw new ApiError(400, 'Message is too long (max 5000 characters)');
     }
 
-    if (!content || content.trim().length === 0) {
-      throw new ApiError(400, 'Message content is required');
+    if (sanitizedContent.length === 0) {
+      throw new ApiError(400, 'Message content cannot be empty');
     }
 
-    // ✅ Check if user is participant
     const conversation = await Conversation.findById(conversationId);
-    if (!conversation) {
-      throw new ApiError(404, 'Conversation not found');
+    if (!conversation) throw new ApiError(404, 'Conversation not found');
+    if (!isParticipant(conversation.participants, userId))
+      throw new ApiError(403, 'Not a participant');
+
+    // Validate replyTo message belongs to same conversation
+    if (replyToId) {
+      const replyMsg = await Message.findById(replyToId);
+      if (!replyMsg || String(replyMsg.conversationId) !== String(conversationId))
+        throw new ApiError(400, 'Invalid reply target');
     }
 
-    if (!isParticipant(conversation.participants, userId)) {
-      throw new ApiError(403, 'You are not a participant in this conversation');
-    }
-
-    // ✅ Create message
     const message = await Message.create({
       conversationId,
       senderId: userId,
-      content: content.trim(),
+      content: sanitizedContent,
+      replyTo: replyToId || null,
     });
 
     await message.populate('senderId', '-password');
+    await message.populate('replyTo');
 
-    // ✅ Update conversation with last message
-    await Conversation.findByIdAndUpdate(
-      conversationId,
-      {
-        lastMessage: content.trim(),
-        lastMessageSenderId: userId,
-        lastMessageTime: new Date(),
-      },
-      { new: true }
-    );
+    await Conversation.findByIdAndUpdate(conversationId, {
+      lastMessage: content.trim(),
+      lastMessageSenderId: userId,
+      lastMessageTime: new Date(),
+    });
 
-    return res.status(201).json(
-      new ApiResponse(201, 'Message sent successfully', message)
-    );
+    return res.status(201).json(new ApiResponse(201, 'Message sent', message));
   } catch (err) {
-    console.error('❌ Send message error:', err);
-    if (err instanceof ApiError) {
+    if (err instanceof ApiError)
       return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
-    }
     return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
   }
 };
 
-// ─── Mark messages as read ────────────────────────────
+// ─── NEW: Edit a message ───────────────────────────────
+export const editMessage = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const { content } = req.body;
+    const userId = req.user._id;
+
+    if (!content?.trim()) throw new ApiError(400, 'Content is required');
+
+    const message = await Message.findById(messageId);
+    if (!message) throw new ApiError(404, 'Message not found');
+
+    // Only sender can edit
+    if (!message.senderId.equals(userId))
+      throw new ApiError(403, 'Only the sender can edit this message');
+
+    if (message.isDeleted)
+      throw new ApiError(400, 'Cannot edit a deleted message');
+
+    message.content = content.trim();
+    message.isEdited = true;
+    message.editedAt = new Date();
+    await message.save();
+
+    await message.populate('senderId', '-password');
+    await message.populate('replyTo');
+
+    return res.status(200).json(new ApiResponse(200, 'Message edited', message));
+  } catch (err) {
+    if (err instanceof ApiError)
+      return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
+    return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
+  }
+};
+
+// ─── NEW: Delete a message ────────────────────────────
+export const deleteMessage = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const { deleteFor } = req.body;   // 'everyone' | 'self'
+    const userId = req.user._id;
+
+    if (!['everyone', 'self'].includes(deleteFor))
+      throw new ApiError(400, 'deleteFor must be "everyone" or "self"');
+
+    const message = await Message.findById(messageId);
+    if (!message) throw new ApiError(404, 'Message not found');
+
+    const conversation = await Conversation.findById(message.conversationId);
+    if (!isParticipant(conversation.participants, userId))
+      throw new ApiError(403, 'Not a participant in this conversation');
+
+    // Only sender can delete for everyone
+    if (deleteFor === 'everyone' && !message.senderId.equals(userId))
+      throw new ApiError(403, 'Only the sender can delete for everyone');
+
+    if (deleteFor === 'everyone') {
+      // Delete for everyone - mark as deleted and wipe content
+      message.isDeleted = true;
+      message.deletedAt = new Date();
+      message.deleteType = 'everyone';
+      message.content = 'This message was deleted';
+    } else {
+      // Delete for self - add user to deletedBy array
+      if (!message.deletedBy) {
+        message.deletedBy = [];
+      }
+      if (!message.deletedBy.some(id => id.equals(userId))) {
+        message.deletedBy.push(userId);
+      }
+    }
+    await message.save();
+
+    return res.status(200).json(
+      new ApiResponse(200, 'Message deleted', { messageId, deleteFor })
+    );
+  } catch (err) {
+    if (err instanceof ApiError)
+      return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
+    return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
+  }
+};
+
+// ─── NEW: Toggle reaction on a message ────────────────
+export const reactToMessage = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const { emoji } = req.body;
+    const userId = req.user._id;
+
+    if (!emoji) throw new ApiError(400, 'Emoji is required');
+
+    const message = await Message.findById(messageId);
+    if (!message) throw new ApiError(404, 'Message not found');
+
+    if (message.isDeleted)
+      throw new ApiError(400, 'Cannot react to a deleted message');
+
+    const reactions = message.reactions || new Map();
+    const usersForEmoji = reactions.get(emoji) || [];
+
+    const alreadyReacted = usersForEmoji.some((id) => id.equals(userId));
+
+    if (alreadyReacted) {
+      // Toggle off — remove user from this emoji
+      reactions.set(
+        emoji,
+        usersForEmoji.filter((id) => !id.equals(userId))
+      );
+      // Clean up empty emoji keys
+      if (reactions.get(emoji).length === 0) reactions.delete(emoji);
+    } else {
+      // Toggle on — add user to this emoji
+      reactions.set(emoji, [...usersForEmoji, userId]);
+    }
+
+    message.reactions = reactions;
+    await message.save();
+
+    // Return serialised reactions as plain object { emoji: [userId, ...] }
+    const reactionsObj = {};
+    for (const [key, val] of message.reactions.entries()) {
+      reactionsObj[key] = val.map(String);
+    }
+
+    return res.status(200).json(
+      new ApiResponse(200, 'Reaction updated', { messageId, reactions: reactionsObj })
+    );
+  } catch (err) {
+    if (err instanceof ApiError)
+      return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
+    return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
+  }
+};
+
+// ─── NEW: Forward a message ───────────────────────────
+export const forwardMessage = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const { targetConversationIds } = req.body;   // array of conversation IDs
+    const userId = req.user._id;
+
+    if (!targetConversationIds?.length)
+      throw new ApiError(400, 'Target conversation IDs are required');
+
+    const originalMessage = await Message.findById(messageId);
+    if (!originalMessage) throw new ApiError(404, 'Original message not found');
+    if (originalMessage.isDeleted)
+      throw new ApiError(400, 'Cannot forward a deleted message');
+
+    const forwardedMessages = [];
+
+    for (const targetConversationId of targetConversationIds) {
+      const conversation = await Conversation.findById(targetConversationId);
+      if (!conversation || !isParticipant(conversation.participants, userId)) continue;
+
+      const msg = await Message.create({
+        conversationId: targetConversationId,
+        senderId: userId,
+        content: originalMessage.content,
+        forwardedFrom: {
+          messageId: originalMessage._id,
+          conversationId: originalMessage.conversationId,
+        },
+      });
+
+      await Conversation.findByIdAndUpdate(targetConversationId, {
+        lastMessage: originalMessage.content,
+        lastMessageSenderId: userId,
+        lastMessageTime: new Date(),
+      });
+
+      await msg.populate('senderId', '-password');
+      forwardedMessages.push(msg);
+    }
+
+    return res.status(201).json(
+      new ApiResponse(201, 'Message forwarded', forwardedMessages)
+    );
+  } catch (err) {
+    if (err instanceof ApiError)
+      return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
+    return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
+  }
+};
+
+// ─── NEW: Search messages within a conversation ───────
+export const searchMessages = async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const { q } = req.query;
+    const userId = req.user._id;
+
+    if (!q || q.trim().length < 1)
+      throw new ApiError(400, 'Search query is required');
+
+    const conversation = await Conversation.findById(conversationId);
+    if (!conversation) throw new ApiError(404, 'Conversation not found');
+    if (!isParticipant(conversation.participants, userId))
+      throw new ApiError(403, 'Not a participant');
+
+    // Escape regex for safety
+    const escaped = q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    const messages = await Message.find({
+      conversationId,
+      isDeleted: false,
+      content: { $regex: escaped, $options: 'i' },
+    })
+      .populate('senderId', 'name email')
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    return res.status(200).json(
+      new ApiResponse(200, 'Search results', { results: messages, count: messages.length })
+    );
+  } catch (err) {
+    if (err instanceof ApiError)
+      return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
+    return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
+  }
+};
+
+// ─── Mark as read ──────────────────────────────────────
 export const markAsRead = async (req, res) => {
   try {
     const { conversationId } = req.params;
     const userId = req.user._id;
 
-    // ✅ Validation
-    if (!conversationId) {
-      throw new ApiError(400, 'Conversation ID is required');
-    }
-
-    // ✅ Check if user is participant
     const conversation = await Conversation.findById(conversationId);
-    if (!conversation) {
-      throw new ApiError(404, 'Conversation not found');
-    }
+    if (!conversation) throw new ApiError(404, 'Conversation not found');
+    if (!isParticipant(conversation.participants, userId))
+      throw new ApiError(403, 'Not a participant');
 
-    if (!isParticipant(conversation.participants, userId)) {
-      throw new ApiError(403, 'You are not a participant in this conversation');
-    }
-
-    // ✅ Mark all unread messages as read - NO DUPLICATES
     await Message.updateMany(
-      {
-        conversationId,
-        senderId: { $ne: userId },
-        isRead: false,
-      },
-      {
-        $set: { isRead: true },
-        $addToSet: { readBy: { userId, readAt: new Date() } }, // ✅ No duplicates
-      }
+      { conversationId, senderId: { $ne: userId }, isRead: false },
+      { $set: { isRead: true }, $addToSet: { readBy: { userId, readAt: new Date() } } }
     );
 
-    return res.status(200).json(
-      new ApiResponse(200, 'Messages marked as read')
-    );
+    return res.status(200).json(new ApiResponse(200, 'Messages marked as read'));
   } catch (err) {
-    console.error('❌ Mark as read error:', err);
-    if (err instanceof ApiError) {
+    if (err instanceof ApiError)
       return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
-    }
     return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
   }
 };
 
-// ─── Search users ─────────────────────────────────────
+// ─── Search users ──────────────────────────────────────
 export const searchUsers = async (req, res) => {
   try {
     const { query } = req.params;
     const userId = req.user._id;
 
-    // ✅ Validation
-    if (!query || query.trim().length === 0) {
-      throw new ApiError(400, 'Search query is required');
-    }
+    if (!query || query.trim().length < 2)
+      throw new ApiError(400, 'Query must be at least 2 characters');
 
-    if (query.trim().length < 2) {
-      throw new ApiError(400, 'Search query must be at least 2 characters');
-    }
-
-    // ✅ Search users by name only - SAFER
+    const escaped = query.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const users = await User.find({
-      name: { $regex: query, $options: 'i' }, // ✅ Case-insensitive name search
-      _id: { $ne: userId }, // ✅ Exclude self
+      name: { $regex: escaped, $options: 'i' },
+      _id: { $ne: userId },
     })
       .select('-password')
       .limit(20)
       .lean();
 
-    return res.status(200).json(
-      new ApiResponse(200, 'Users found successfully', users)
-    );
+    return res.status(200).json(new ApiResponse(200, 'Users found', users));
   } catch (err) {
-    console.error('❌ Search users error:', err);
-    if (err instanceof ApiError) {
+    if (err instanceof ApiError)
       return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
-    }
     return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
   }
 };
 
-// ─── Delete conversation ──────────────────────────────
+// ─── Delete conversation ───────────────────────────────
 export const deleteConversation = async (req, res) => {
   try {
     const { conversationId } = req.params;
     const userId = req.user._id;
 
-    // ✅ Validation
-    if (!conversationId) {
-      throw new ApiError(400, 'Conversation ID is required');
-    }
-
-    // ✅ Check if user is participant
     const conversation = await Conversation.findById(conversationId);
-    if (!conversation) {
-      throw new ApiError(404, 'Conversation not found');
-    }
+    if (!conversation) throw new ApiError(404, 'Conversation not found');
+    if (!isParticipant(conversation.participants, userId))
+      throw new ApiError(403, 'Not a participant');
+    if (conversation.isGroup && conversation.groupAdmin && !conversation.groupAdmin.equals(userId))
+      throw new ApiError(403, 'Only group admin can delete group');
 
-    if (!isParticipant(conversation.participants, userId)) {
-      throw new ApiError(403, 'You are not a participant in this conversation');
-    }
-
-    // ✅ If group, check if user is admin
-    if (conversation.isGroup && !conversation.groupAdmin.equals(userId)) {
-      throw new ApiError(403, 'Only group admin can delete the group');
-    }
-
-    // ✅ Delete all messages in conversation
     await Message.deleteMany({ conversationId });
-
-    // ✅ Delete conversation
     await Conversation.findByIdAndDelete(conversationId);
 
-    return res.status(200).json(
-      new ApiResponse(200, 'Conversation deleted successfully')
-    );
+    return res.status(200).json(new ApiResponse(200, 'Conversation deleted'));
   } catch (err) {
-    console.error('❌ Delete conversation error:', err);
-    if (err instanceof ApiError) {
+    if (err instanceof ApiError)
       return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
-    }
     return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
   }
 };
 
-// ─── Add participant to group ──────────────────────────
+// ─── Add participant ───────────────────────────────────
 export const addParticipant = async (req, res) => {
   try {
     const { conversationId } = req.params;
     const { userId: newUserId } = req.body;
     const userId = req.user._id;
 
-    // ✅ Validation
-    if (!conversationId) {
-      throw new ApiError(400, 'Conversation ID is required');
-    }
-
-    if (!newUserId) {
-      throw new ApiError(400, 'User ID is required');
-    }
-
-    // ✅ Check if conversation exists and is group
     const conversation = await Conversation.findById(conversationId);
-    if (!conversation) {
-      throw new ApiError(404, 'Conversation not found');
-    }
+    if (!conversation) throw new ApiError(404, 'Conversation not found');
+    if (!conversation.isGroup) throw new ApiError(400, 'Not a group chat');
+    if (!conversation.groupAdmin.equals(userId))
+      throw new ApiError(403, 'Only admin can add participants');
 
-    if (!conversation.isGroup) {
-      throw new ApiError(400, 'Cannot add participants to one-to-one chat');
-    }
-
-    // ✅ Check if user is admin
-    if (!conversation.groupAdmin.equals(userId)) {
-      throw new ApiError(403, 'Only group admin can add participants');
-    }
-
-    // ✅ Check if new user exists
     const newUser = await User.findById(newUserId);
-    if (!newUser) {
-      throw new ApiError(400, 'User does not exist');
-    }
+    if (!newUser) throw new ApiError(400, 'User does not exist');
+    if (conversation.participants.some((id) => id.equals(newUserId)))
+      throw new ApiError(400, 'User already a participant');
 
-    // ✅ Check if user is already participant
-    if (conversation.participants.some(id => id.equals(newUserId))) {
-      throw new ApiError(400, 'User is already a participant');
-    }
-
-    // ✅ Add participant
     conversation.participants.push(newUserId);
     await conversation.save();
     await conversation.populate('participants', '-password');
 
-    return res.status(200).json(
-      new ApiResponse(200, 'Participant added successfully', conversation)
-    );
+    return res.status(200).json(new ApiResponse(200, 'Participant added', conversation));
   } catch (err) {
-    console.error('❌ Add participant error:', err);
-    if (err instanceof ApiError) {
+    if (err instanceof ApiError)
       return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
-    }
     return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
   }
 };
 
-// ─── Remove participant from group ────────────────────
+// ─── Remove participant ───────────────────────────────
 export const removeParticipant = async (req, res) => {
   try {
     const { conversationId } = req.params;
     const { userId: removeUserId } = req.body;
     const userId = req.user._id;
 
-    // ✅ Validation
-    if (!conversationId) {
-      throw new ApiError(400, 'Conversation ID is required');
-    }
-
-    if (!removeUserId) {
-      throw new ApiError(400, 'User ID is required');
-    }
-
-    // ✅ Check if conversation exists and is group
     const conversation = await Conversation.findById(conversationId);
-    if (!conversation) {
-      throw new ApiError(404, 'Conversation not found');
-    }
-
-    if (!conversation.isGroup) {
-      throw new ApiError(400, 'Cannot remove participants from one-to-one chat');
-    }
-
-    // ✅ Check if user is admin or is removing themselves
-    if (!conversation.groupAdmin.equals(userId) && !userId.equals(removeUserId)) {
-      throw new ApiError(403, 'Only group admin can remove participants');
-    }
-
-    // ✅ Check if user is participant
-    if (!conversation.participants.some(id => id.equals(removeUserId))) {
+    if (!conversation) throw new ApiError(404, 'Conversation not found');
+    if (!conversation.isGroup) throw new ApiError(400, 'Not a group chat');
+    if (!conversation.groupAdmin.equals(userId) && !userId.equals(removeUserId))
+      throw new ApiError(403, 'Only admin can remove participants');
+    if (!conversation.participants.some((id) => id.equals(removeUserId)))
       throw new ApiError(400, 'User is not a participant');
-    }
 
-    // ✅ Remove participant
     conversation.participants = conversation.participants.filter(
       (id) => !id.equals(removeUserId)
     );
 
-    // ✅ If group becomes empty, delete it
     if (conversation.participants.length === 0) {
       await Message.deleteMany({ conversationId });
       await Conversation.findByIdAndDelete(conversationId);
-      return res.status(200).json(
-        new ApiResponse(200, 'Last participant removed. Group deleted.')
-      );
+      return res.status(200).json(new ApiResponse(200, 'Group deleted — no participants left'));
     }
 
     await conversation.save();
     await conversation.populate('participants', '-password');
 
-    return res.status(200).json(
-      new ApiResponse(200, 'Participant removed successfully', conversation)
-    );
+    return res.status(200).json(new ApiResponse(200, 'Participant removed', conversation));
   } catch (err) {
-    console.error('❌ Remove participant error:', err);
-    if (err instanceof ApiError) {
+    if (err instanceof ApiError)
       return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
-    }
     return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
   }
 };

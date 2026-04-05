@@ -21,8 +21,10 @@ const PublicRoute = ({ children }) => {
 
 export default function App() {
   return (
-    <ChatProvider>
-      <BrowserRouter>
+    // ✅ FIX: BrowserRouter must wrap ChatProvider so that context consumers
+    // (and ChatProvider itself) have access to router context (useNavigate, etc.)
+    <BrowserRouter>
+      <ChatProvider>
         <Routes>
           {/* ✅ Default redirect */}
           <Route path="/" element={<Navigate to="/login" replace />} />
@@ -63,7 +65,7 @@ export default function App() {
           {/* ✅ 404 - catch all */}
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
-      </BrowserRouter>
-    </ChatProvider>
+      </ChatProvider>
+    </BrowserRouter>
   );
 }

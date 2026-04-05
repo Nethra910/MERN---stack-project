@@ -5,7 +5,6 @@ import API from '../api/axios';
 
 // ── Animated Envelope SVG ─────────────────────────────────────────────────────
 function Envelope({ phase }) {
-  // flap opens when phase is 'open' or later
   const flapOpen = phase === 'open' || phase === 'expand' || phase === 'done';
 
   return (
@@ -15,7 +14,6 @@ function Envelope({ phase }) {
       viewBox="0 0 120 90"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
-      // Shake slightly when landing
       animate={
         phase === 'land'
           ? { y: [0, -8, 4, -4, 0], rotate: [-3, 3, -2, 2, 0] }
@@ -31,16 +29,9 @@ function Envelope({ phase }) {
           : { duration: 0.3 }
       }
     >
-      {/* Envelope body */}
       <rect x="4" y="24" width="112" height="62" rx="8" fill="url(#envBodyGrad)" />
-
-      {/* Envelope bottom fold lines */}
       <path d="M4 72 L60 48 L116 72" stroke="rgba(255,255,255,0.15)" strokeWidth="1" fill="none" />
-
-      {/* Left & right diagonal fold */}
       <path d="M4 24 L60 54 L116 24" stroke="rgba(255,255,255,0.2)" strokeWidth="1.5" fill="none" />
-
-      {/* Flap — rotates open */}
       <motion.g
         style={{ originX: '60px', originY: '24px' }}
         animate={{ rotateX: flapOpen ? -160 : 0 }}
@@ -53,8 +44,6 @@ function Envelope({ phase }) {
           strokeWidth="1"
         />
       </motion.g>
-
-      {/* Checkmark — revealed after flap opens */}
       <AnimatePresence>
         {flapOpen && (
           <motion.g
@@ -78,10 +67,7 @@ function Envelope({ phase }) {
           </motion.g>
         )}
       </AnimatePresence>
-
-      {/* Shine glare */}
       <rect x="12" y="30" width="30" height="5" rx="2.5" fill="rgba(255,255,255,0.18)" />
-
       <defs>
         <linearGradient id="envBodyGrad" x1="4" y1="24" x2="116" y2="86" gradientUnits="userSpaceOnUse">
           <stop offset="0%" stopColor="#34d399" />
@@ -96,7 +82,6 @@ function Envelope({ phase }) {
   );
 }
 
-// ── Floating particle dots around envelope ────────────────────────────────────
 function SparkParticles() {
   const sparks = [
     { x: -55, y: -30, delay: 0,    size: 5 },
@@ -138,14 +123,12 @@ function SparkParticles() {
 export default function VerifyEmail() {
   const { token } = useParams();
   const navigate = useNavigate();
-  const [status, setStatus] = useState('verifying'); // verifying | success | error
+  const [status, setStatus] = useState('verifying');
   const [message, setMessage] = useState('');
 
-  // Animation phases: 'fly' → 'land' → 'open' → 'spark' → 'expand' → 'done'
   const [phase, setPhase] = useState('fly');
   const [showSparks, setShowSparks] = useState(false);
 
-  // Run envelope animation regardless of API result
   useEffect(() => {
     const t1 = setTimeout(() => setPhase('land'),   700);
     const t2 = setTimeout(() => setPhase('open'),   1300);
@@ -158,7 +141,6 @@ export default function VerifyEmail() {
     return () => [t1, t2, t3, t4, t5].forEach(clearTimeout);
   }, []);
 
-  // API call
   useEffect(() => {
     const verify = async () => {
       if (!token) {
@@ -170,6 +152,7 @@ export default function VerifyEmail() {
         const { data } = await API.get(`/auth/verify-email/${token}`);
         setStatus('success');
         setMessage(data.message);
+        // ✅ FIX: redirect in 6s to match the UI text below ("6 seconds")
         setTimeout(() => navigate('/login'), 6000);
       } catch (err) {
         setStatus('error');
@@ -184,19 +167,12 @@ export default function VerifyEmail() {
       className="relative min-h-screen flex items-center justify-center overflow-hidden"
       style={{ backgroundColor: '#021a0e' }}
     >
-
-      {/* ── Stage 1: Envelope flies in from top-right, lands center ── */}
       <AnimatePresence>
         {phase !== 'done' && (
           <motion.div
             key="envelope-stage"
             initial={{ x: '60vw', y: '-60vh', rotate: -25, opacity: 0 }}
-            animate={{
-              x: 0,
-              y: 0,
-              rotate: 0,
-              opacity: 1,
-            }}
+            animate={{ x: 0, y: 0, rotate: 0, opacity: 1 }}
             transition={{ duration: 0.65, ease: [0.25, 0.46, 0.45, 0.94] }}
             exit={{ opacity: 0, transition: { duration: 0.2 } }}
             style={{
@@ -208,142 +184,21 @@ export default function VerifyEmail() {
               gap: 18,
             }}
           >
-            {/* Glow behind envelope */}
-            <motion.div
-              animate={
-                phase === 'open' || phase === 'spark'
-                  ? { scale: 1.6, opacity: 0.6 }
-                  : phase === 'expand'
-                  ? { scale: 3, opacity: 0 }
-                  : { scale: 1, opacity: 0.25 }
-              }
-              transition={{ duration: 0.5 }}
-              style={{
-                position: 'absolute',
-                width: 140,
-                height: 140,
-                borderRadius: '50%',
-                background: 'radial-gradient(circle, rgba(52,211,153,0.5) 0%, transparent 70%)',
-                filter: 'blur(16px)',
-              }}
-            />
-
-            {/* Flight trail */}
-            <AnimatePresence>
-              {phase === 'fly' && (
-                <motion.div
-                  initial={{ opacity: 0.6, scaleX: 1 }}
-                  animate={{ opacity: 0, scaleX: 0 }}
-                  transition={{ duration: 0.5, delay: 0.3 }}
-                  style={{
-                    position: 'absolute',
-                    right: 100,
-                    top: '50%',
-                    width: 120,
-                    height: 3,
-                    background: 'linear-gradient(to left, rgba(52,211,153,0.6), transparent)',
-                    borderRadius: 2,
-                    transformOrigin: 'right center',
-                  }}
-                />
-              )}
-            </AnimatePresence>
-
-            <Envelope phase={phase} />
-
-            {/* Spark particles on open */}
-            {showSparks && <SparkParticles />}
-
-            {/* Status label */}
+            <div style={{ position: 'relative' }}>
+              <Envelope phase={phase} />
+              {showSparks && <SparkParticles />}
+            </div>
             <motion.p
-              animate={
-                phase === 'expand' ? { opacity: 0 } : { opacity: 1 }
-              }
-              style={{
-                color: 'rgba(110,231,183,0.8)',
-                fontSize: 13,
-                fontWeight: 500,
-                letterSpacing: '0.08em',
-                textTransform: 'uppercase',
-                marginTop: 4,
-              }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: phase === 'land' || phase === 'open' ? 1 : 0 }}
+              style={{ color: 'rgba(110,231,183,0.7)', fontSize: 14 }}
             >
-              {phase === 'fly'  && 'Incoming...'}
-              {phase === 'land' && 'Received!'}
-              {(phase === 'open' || phase === 'spark') && 'Opening...'}
+              Verifying your email...
             </motion.p>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ── Stage 2: Green background expands from center ── */}
-      <AnimatePresence>
-        {(phase === 'expand' || phase === 'done') && (
-          <motion.div
-            key="bg-expand"
-            initial={{ scale: 0, borderRadius: '50%' }}
-            animate={{ scale: 38, borderRadius: '10%' }}
-            transition={{ duration: 0.75, ease: [0.22, 1, 0.36, 1] }}
-            style={{
-              position: 'absolute',
-              zIndex: 20,
-              width: 100,
-              height: 100,
-              top: '50%',
-              left: '50%',
-              marginLeft: -50,
-              marginTop: -50,
-              background: 'radial-gradient(circle at 38% 35%, #34d399, #059669 55%, #064e3b)',
-              pointerEvents: 'none',
-            }}
-          />
-        )}
-      </AnimatePresence>
-
-      {/* ── Settled background ── */}
-      <AnimatePresence>
-        {phase === 'done' && (
-          <motion.div
-            key="bg-settled"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.4 }}
-            style={{
-              position: 'absolute',
-              inset: 0,
-              zIndex: 22,
-              background: 'radial-gradient(ellipse at 50% 45%, #065f46 0%, #064e3b 45%, #021a0e 100%)',
-              pointerEvents: 'none',
-            }}
-          >
-            {/* Floating letter/dot particles */}
-            {[...Array(10)].map((_, i) => (
-              <motion.div
-                key={i}
-                animate={{ y: [0, -24, 0], opacity: [0.1, 0.4, 0.1] }}
-                transition={{
-                  duration: 3 + i * 0.35,
-                  repeat: Infinity,
-                  delay: i * 0.45,
-                  ease: 'easeInOut',
-                }}
-                style={{
-                  position: 'absolute',
-                  width: 3 + (i % 3) * 2,
-                  height: 3 + (i % 3) * 2,
-                  borderRadius: '50%',
-                  backgroundColor: '#6ee7b7',
-                  boxShadow: '0 0 6px rgba(110,231,183,0.6)',
-                  left: `${7 + i * 9}%`,
-                  top: `${18 + (i % 5) * 14}%`,
-                }}
-              />
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ── Final Card ── */}
       <AnimatePresence>
         {phase === 'done' && (
           <motion.div
@@ -365,8 +220,6 @@ export default function VerifyEmail() {
                 boxShadow: '0 40px 80px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1)',
               }}
             >
-
-              {/* ── SUCCESS ── */}
               {status === 'success' && (
                 <motion.div
                   initial={{ opacity: 0, y: 16 }}
@@ -400,15 +253,15 @@ export default function VerifyEmail() {
                       />
                     </motion.svg>
                   </motion.div>
-
                   <h2 style={{ fontSize: 26, fontWeight: 700, color: '#fff', margin: '0 0 10px' }}>
                     Email Verified! 🎉
                   </h2>
                   <p style={{ color: 'rgba(110,231,183,0.75)', fontSize: 14, marginBottom: 28 }}>
                     {message}
                   </p>
+                  {/* ✅ FIX: Text now matches the actual 6-second redirect timeout */}
                   <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, marginBottom: 20 }}>
-                    Redirecting to login in 3 seconds...
+                    Redirecting to login in 6 seconds...
                   </p>
                   <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
                     <Link
@@ -431,7 +284,6 @@ export default function VerifyEmail() {
                 </motion.div>
               )}
 
-              {/* ── VERIFYING (API still in flight) ── */}
               {status === 'verifying' && (
                 <motion.div
                   initial={{ opacity: 0 }}
@@ -459,7 +311,6 @@ export default function VerifyEmail() {
                 </motion.div>
               )}
 
-              {/* ── ERROR ── */}
               {status === 'error' && (
                 <motion.div
                   initial={{ opacity: 0, y: 16 }}
@@ -480,26 +331,20 @@ export default function VerifyEmail() {
                       <path d="M6 18L18 6M6 6l12 12" />
                     </svg>
                   </div>
-
                   <h2 style={{ fontSize: 24, fontWeight: 700, color: '#fff', margin: '0 0 10px' }}>
                     Verification Failed
                   </h2>
                   <p style={{ color: 'rgba(248,113,113,0.8)', fontSize: 14, marginBottom: 28 }}>
                     {message}
                   </p>
-
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                     <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
                       <Link
                         to="/register"
                         style={{
-                          display: 'block',
-                          padding: '12px',
-                          background: 'rgba(52,211,153,0.85)',
-                          color: '#fff',
-                          fontWeight: 700,
-                          fontSize: 15,
-                          borderRadius: 12,
+                          display: 'block', padding: '12px',
+                          background: 'rgba(52,211,153,0.85)', color: '#fff',
+                          fontWeight: 700, fontSize: 15, borderRadius: 12,
                           textDecoration: 'none',
                           boxShadow: '0 4px 20px rgba(5,150,105,0.35)',
                         }}
@@ -511,14 +356,11 @@ export default function VerifyEmail() {
                       <Link
                         to="/login"
                         style={{
-                          display: 'block',
-                          padding: '12px',
+                          display: 'block', padding: '12px',
                           background: 'rgba(255,255,255,0.1)',
                           border: '1px solid rgba(255,255,255,0.2)',
                           color: 'rgba(255,255,255,0.8)',
-                          fontWeight: 600,
-                          fontSize: 15,
-                          borderRadius: 12,
+                          fontWeight: 600, fontSize: 15, borderRadius: 12,
                           textDecoration: 'none',
                         }}
                       >
@@ -528,7 +370,6 @@ export default function VerifyEmail() {
                   </div>
                 </motion.div>
               )}
-
             </div>
           </motion.div>
         )}

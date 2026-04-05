@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import API from '../api/axios';
+import { validatePasswordStrength, getPasswordStrength } from '../utils/validators';
 
 // ── SVG Blob paths (morph between these) ──────────────────────────────────────
 const BLOB_PATHS = [
@@ -29,6 +30,8 @@ export default function Register() {
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   const [blobDone, setBlobDone] = useState(false);
+  const [passwordStrength, setPasswordStrength] = useState({ strength: 'none', score: 0 });
+  const [passwordErrors, setPasswordErrors] = useState([]);
   const navigate = useNavigate();
   const blobPath = useBlobMorph();
 
@@ -39,8 +42,16 @@ export default function Register() {
   }, []);
 
   const handleChange = (e) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    setForm({ ...form, [name]: value });
     setError('');
+
+    // Real-time password strength check
+    if (name === 'password') {
+      setPasswordStrength(getPasswordStrength(value));
+      const validation = validatePasswordStrength(value);
+      setPasswordErrors(validation.errors);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -49,13 +60,16 @@ export default function Register() {
     setSuccess('');
     setLoading(true);
 
+    // Client-side validation
     if (form.name.trim().length < 2) {
       setError('Name must be at least 2 characters');
       setLoading(false);
       return;
     }
-    if (form.password.length < 6) {
-      setError('Password must be at least 6 characters');
+
+    const passwordValidation = validatePasswordStrength(form.password);
+    if (!passwordValidation.isValid) {
+      setError('Password requirements: ' + passwordValidation.errors.join(', '));
       setLoading(false);
       return;
     }

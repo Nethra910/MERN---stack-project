@@ -2,8 +2,8 @@ import axios from 'axios';
 
 // ✅ Create axios instance with baseURL and timeout
 const API = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5001/api', // ✅ Fixed port to 5001
-  timeout: 10000, // ✅ Added 10 second timeout
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5001/api',
+  timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -32,9 +32,9 @@ API.interceptors.response.use(
       // Clear stored data
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      
-      // Redirect to login if not already there
-      if (window.location.pathname !== '/login') {
+
+      // ✅ FIX: Guard window access (safe in browser, avoids SSR crash)
+      if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
         window.location.href = '/login';
       }
     }

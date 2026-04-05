@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useChat } from '../context/ChatContext';
 import UserSearch from './UserSearch';
@@ -6,30 +6,52 @@ import UserSearch from './UserSearch';
 export default function ConversationList() {
   const { conversations, currentConversation, setCurrentConversation, fetchMessages, onlineUsers, loading } = useChat();
   const [searchOpen, setSearchOpen] = useState(false);
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
+
+  const user = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem('user') || '{}');
+    } catch {
+      return {};
+    }
+  }, []);
+
+  // ✅ FIX: Login stores user with 'id' (not '_id'), so check both
+  const currentUserId = String(user?.id || user?._id || '');
 
   const handleSelectConversation = (conversation) => {
     setCurrentConversation(conversation);
     fetchMessages(conversation._id);
   };
 
+  const getOtherUser = (conversation) => {
+    if (!conversation?.participants?.length) return null;
+    return conversation.participants.find((p) => String(p?._id) !== currentUserId) || null;
+  };
+
   const getDisplayName = (conversation) => {
     if (conversation.isGroup) {
       return conversation.groupName || 'Group Chat';
     }
-    const otherUser = conversation.participants?.find((p) => p._id !== user._id);
-    return otherUser?.name || 'Unknown';
+    const otherUser = getOtherUser(conversation);
+    return otherUser?.name || otherUser?.fullName || otherUser?.username || 'Unknown';
   };
 
   const isUserOnline = (conversation) => {
     if (conversation.isGroup) return false;
-    const otherUser = conversation.participants?.find((p) => p._id !== user._id);
-    return otherUser && onlineUsers.has(otherUser._id);
+    const otherUser = getOtherUser(conversation);
+    if (!otherUser?._id) return false;
+    return onlineUsers.has(String(otherUser._id));
+  };
+
+  const formatConversationDate = (dateValue) => {
+    if (!dateValue) return '';
+    const d = new Date(dateValue);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleDateString();
   };
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
       <motion.div
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
@@ -48,7 +70,6 @@ export default function ConversationList() {
           </motion.button>
         </div>
 
-        {/* Search Input */}
         <motion.div
           initial={{ height: 0, opacity: 0 }}
           animate={{ height: searchOpen ? 'auto' : 0, opacity: searchOpen ? 1 : 0 }}
@@ -63,7 +84,6 @@ export default function ConversationList() {
         </motion.div>
       </motion.div>
 
-      {/* User Search Component */}
       <AnimatePresence>
         {searchOpen && (
           <motion.div
@@ -78,7 +98,6 @@ export default function ConversationList() {
         )}
       </AnimatePresence>
 
-      {/* Conversations List */}
       <div className="flex-1 overflow-y-auto">
         <AnimatePresence>
           {loading ? (
@@ -117,9 +136,7 @@ export default function ConversationList() {
                 }`}
               >
                 <div className="flex items-start justify-between mb-1">
-                  <p className="font-medium text-gray-800 truncate">
-                    {getDisplayName(conversation)}
-                  </p>
+                  <p className="font-medium text-gray-800 truncate">{getDisplayName(conversation)}</p>
                   {isUserOnline(conversation) && (
                     <motion.span
                       initial={{ scale: 0 }}
@@ -132,7 +149,7 @@ export default function ConversationList() {
                   {conversation.lastMessage || 'No messages yet'}
                 </p>
                 <p className="text-xs text-gray-400 mt-1">
-                  {new Date(conversation.lastMessageTime).toLocaleDateString()}
+                  {formatConversationDate(conversation.lastMessageTime)}
                 </p>
               </motion.div>
             ))

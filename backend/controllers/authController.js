@@ -5,6 +5,12 @@ import User from '../models/User.js';
 import sendEmail from '../utils/sendEmail.js';
 import ApiError from '../utils/ApiError.js';
 import ApiResponse from '../utils/ApiResponse.js';
+import { 
+  validatePasswordStrength, 
+  validateEmail, 
+  validateName,
+  sanitizeInput 
+} from '../utils/validators.js';
 
 // ─── Helpers ──────────────────────────────────────────
 const generateToken = (userId) =>
@@ -12,16 +18,6 @@ const generateToken = (userId) =>
 
 const generateSecureToken = () =>
   crypto.randomBytes(32).toString('hex');
-
-// Input validation helpers
-const validateEmail = (email) => {
-  const emailRegex = /^\S+@\S+\.\S+$/;
-  return emailRegex.test(email);
-};
-
-const validatePassword = (password) => {
-  return password && password.length >= 6;
-};
 
 // ─── REGISTER ─────────────────────────────────────────
 export const register = async (req, res) => {
@@ -33,16 +29,22 @@ export const register = async (req, res) => {
       throw new ApiError(400, 'All fields are required');
     }
 
-    if (name.trim().length < 2) {
-      throw new ApiError(400, 'Name must be at least 2 characters');
+    // Validate name
+    const nameValidation = validateName(name);
+    if (!nameValidation.isValid) {
+      throw new ApiError(400, nameValidation.error);
     }
 
-    if (!validateEmail(email)) {
-      throw new ApiError(400, 'Please provide a valid email address');
+    // Validate email
+    const emailValidation = validateEmail(email);
+    if (!emailValidation.isValid) {
+      throw new ApiError(400, emailValidation.error);
     }
 
-    if (!validatePassword(password)) {
-      throw new ApiError(400, 'Password must be at least 6 characters');
+    // Validate password strength
+    const passwordValidation = validatePasswordStrength(password);
+    if (!passwordValidation.isValid) {
+      throw new ApiError(400, passwordValidation.errors.join('. '));
     }
 
     // Check if user already exists
@@ -59,7 +61,7 @@ export const register = async (req, res) => {
 
     // ✅ Create user with sanitized data
     await User.create({
-      name: name.trim(),
+      name: sanitizeInput(name.trim()),
       email: email.toLowerCase().trim(),
       password: hashedPassword,
       verificationToken,
