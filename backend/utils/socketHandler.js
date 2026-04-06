@@ -1,13 +1,25 @@
 // No unused imports — socket only handles real-time relay
+import User from '../models/User.js';
+
 const onlineUsers = new Map();
+
+// Helper to update lastSeen in database
+const updateLastSeen = async (userId) => {
+  try {
+    await User.findByIdAndUpdate(userId, { lastSeen: new Date() });
+  } catch (err) {
+    console.error('Failed to update lastSeen:', err);
+  }
+};
 
 export const initializeSocket = (io) => {
   io.on('connection', (socket) => {
     console.log(`✅ User connected: ${socket.id}`);
 
     // ─── User online ──────────────────────────────────
-    socket.on('user-online', (userId) => {
+    socket.on('user-online', async (userId) => {
       onlineUsers.set(userId, socket.id);
+      await updateLastSeen(userId);
       socket.broadcast.emit('user-status', { userId, status: 'online', timestamp: new Date() });
     });
 
@@ -24,6 +36,8 @@ export const initializeSocket = (io) => {
     socket.on('send-message', async (data) => {
       try {
         const { conversationId, senderId, content, messageId, replyTo } = data;
+        // Update sender's lastSeen on activity
+        await updateLastSeen(senderId);
         io.to(`conversation:${conversationId}`).emit('receive-message', {
           conversationId,
           senderId,
@@ -98,13 +112,14 @@ export const initializeSocket = (io) => {
     });
 
     // ─── Disconnect ────────────────────────────────────
-    socket.on('disconnect', () => {
+    socket.on('disconnect', async () => {
       let userId;
       for (const [key, value] of onlineUsers.entries()) {
         if (value === socket.id) { userId = key; break; }
       }
       if (userId) {
         onlineUsers.delete(userId);
+        await updateLastSeen(userId);
         socket.broadcast.emit('user-status', { userId, status: 'offline', timestamp: new Date() });
       }
     });

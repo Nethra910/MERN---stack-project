@@ -16,11 +16,24 @@ const messageSchema = new mongoose.Schema(
     },
     content: {
       type: String,
-      required: [true, 'Message content is required'],
       trim: true,
-      minlength: [1, 'Message cannot be empty'],
       maxlength: [5000, 'Message exceeds maximum length'],
+      default: '',
     },
+
+    // ─── Media attachments ─────────────────────────────
+    attachments: [{
+      url: { type: String, required: true },
+      publicId: { type: String }, // Cloudinary public ID for deletion
+      type: { type: String, enum: ['image', 'video', 'audio'], required: true },
+      mimeType: { type: String },
+      name: { type: String },
+      size: { type: Number }, // in bytes
+      width: { type: Number },
+      height: { type: Number },
+      duration: { type: Number }, // for videos/audio, in seconds
+      thumbnail: { type: String }, // thumbnail URL for videos
+    }],
 
     // ─── Reply to a specific message ──────────────────
     replyTo: {

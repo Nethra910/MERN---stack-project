@@ -24,11 +24,39 @@ export const ChatProvider = ({ children }) => {
   const [forwardModalOpen, setForwardModalOpen]   = useState(false);
   const [messageToForward, setMessageToForward]   = useState(null);
 
+  // ─── Pagination state ────────────────────────────
+  const [hasMoreMessages, setHasMoreMessages]     = useState(true);
+  const [isLoadingMore, setIsLoadingMore]         = useState(false);
+  const [messageSkip, setMessageSkip]             = useState(0);
+  const MESSAGE_LIMIT = 50;
+
+  // ─── Unread counts & pins ────────────────────────
+  const [unreadCounts, setUnreadCounts]           = useState({});
+  const [totalUnread, setTotalUnread]             = useState(0);
+
+  // ─── Notification preference (persisted) ────────────
+  const [notificationsEnabled, setNotificationsEnabled] = useState(() => {
+    const saved = localStorage.getItem('notificationsEnabled');
+    return saved !== null ? saved === 'true' : true; // Default to enabled
+  });
+
   // ─── Ref so socket handlers always see latest conversation ──
   const currentConversationRef = useRef(null);
   useEffect(() => {
     currentConversationRef.current = currentConversation;
   }, [currentConversation]);
+
+  // ─── Ref for notification preference (for socket handler) ──
+  const notificationsEnabledRef = useRef(notificationsEnabled);
+  useEffect(() => {
+    notificationsEnabledRef.current = notificationsEnabled;
+    localStorage.setItem('notificationsEnabled', String(notificationsEnabled));
+  }, [notificationsEnabled]);
+
+  // ─── Toggle notifications ──────────────────────────
+  const toggleNotifications = useCallback(() => {
+    setNotificationsEnabled(prev => !prev);
+  }, []);
 
   // ─── Socket setup (created once) ──────────────────
   useEffect(() => {
@@ -45,6 +73,11 @@ export const ChatProvider = ({ children }) => {
 
     newSocket.on('connect', () => newSocket.emit('user-online', userId));
 
+    // Request notification permission on connect
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+
     // Incoming new message
     newSocket.on('receive-message', (data) => {
       if (data.conversationId === currentConversationRef.current?._id) {
@@ -53,8 +86,26 @@ export const ChatProvider = ({ children }) => {
           if (prev.some((m) => m._id === data._id)) return prev;
           return [...prev, data];
         });
+      } else {
+        // Show browser notification for messages in other conversations
+        // Only if user has enabled notifications AND browser permission is granted
+        if (
+          notificationsEnabledRef.current &&
+          'Notification' in window && 
+          Notification.permission === 'granted' && 
+          document.hidden
+        ) {
+          const senderName = data.senderId?.name || 'Someone';
+          const content = data.content || 'Sent a message';
+          new Notification(`New message from ${senderName}`, {
+            body: content.slice(0, 100),
+            icon: '/favicon.ico',
+            tag: data.conversationId, // Prevent duplicate notifications
+          });
+        }
       }
       fetchConversations();
+      fetchUnreadCounts();
     });
 
     // ─── NEW: Edit ─────────────────────────────────
@@ -136,15 +187,97 @@ export const ChatProvider = ({ children }) => {
     }
   }, []);
 
+  // ─── Fetch unread counts ───────────────────────────
+  const fetchUnreadCounts = useCallback(async () => {
+    try {
+      const response = await chatApi.getUnreadCounts();
+      const data = response?.data?.data;
+      setUnreadCounts(data?.unreadCounts || {});
+      setTotalUnread(data?.totalUnread || 0);
+    } catch (err) {
+      console.error('Failed to fetch unread counts:', err);
+    }
+  }, []);
+
+  // ─── Mark conversation as read ─────────────────────
+  const markConversationAsRead = useCallback(async (conversationId) => {
+    try {
+      await chatApi.markAsRead(conversationId);
+      // Update local state
+      setUnreadCounts(prev => {
+        const newCounts = { ...prev };
+        delete newCounts[conversationId];
+        return newCounts;
+      });
+      setTotalUnread(prev => Math.max(0, prev - (unreadCounts[conversationId] || 0)));
+    } catch (err) {
+      console.error('Failed to mark as read:', err);
+    }
+  }, [unreadCounts]);
+
+  // ─── Pin/Unpin conversation ────────────────────────
+  const pinConversation = useCallback(async (conversationId) => {
+    try {
+      await chatApi.pinConversation(conversationId);
+      fetchConversations(); // Refresh to get updated pinnedBy
+    } catch (err) {
+      console.error('Failed to pin conversation:', err);
+    }
+  }, [fetchConversations]);
+
+  const unpinConversation = useCallback(async (conversationId) => {
+    try {
+      await chatApi.unpinConversation(conversationId);
+      fetchConversations(); // Refresh to get updated pinnedBy
+    } catch (err) {
+      console.error('Failed to unpin conversation:', err);
+    }
+  }, [fetchConversations]);
+
   // ─── Fetch messages ────────────────────────────────
   const fetchMessages = useCallback(async (conversationId) => {
     try {
-      const response = await API.get(`/chat/conversations/${conversationId}/messages?limit=50`);
-      setMessages(response?.data?.data?.messages || []);
+      const response = await API.get(`/chat/conversations/${conversationId}/messages?limit=${MESSAGE_LIMIT}`);
+      const data = response?.data?.data;
+      setMessages(data?.messages || []);
+      setMessageSkip(MESSAGE_LIMIT);
+      setHasMoreMessages((data?.messages?.length || 0) >= MESSAGE_LIMIT);
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to fetch messages');
     }
   }, []);
+
+  // ─── Load more messages (pagination) ───────────────
+  const loadMoreMessages = useCallback(async () => {
+    const conv = currentConversationRef.current;
+    if (!conv || isLoadingMore || !hasMoreMessages) return;
+
+    setIsLoadingMore(true);
+    try {
+      const response = await API.get(
+        `/chat/conversations/${conv._id}/messages?limit=${MESSAGE_LIMIT}&skip=${messageSkip}`
+      );
+      const data = response?.data?.data;
+      const olderMessages = data?.messages || [];
+      
+      if (olderMessages.length > 0) {
+        // Prepend older messages (they come in ascending order, so they go before current)
+        setMessages((prev) => {
+          // Avoid duplicates
+          const existingIds = new Set(prev.map(m => m._id));
+          const newMessages = olderMessages.filter(m => !existingIds.has(m._id));
+          return [...newMessages, ...prev];
+        });
+        setMessageSkip(prev => prev + olderMessages.length);
+      }
+      
+      setHasMoreMessages(olderMessages.length >= MESSAGE_LIMIT);
+    } catch (err) {
+      console.error('Failed to load more messages:', err);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [isLoadingMore, hasMoreMessages, messageSkip]);
 
   // ─── Create conversation ───────────────────────────
   const createConversation = useCallback(async (participantIds) => {
@@ -188,6 +321,70 @@ export const ChatProvider = ({ children }) => {
       setError(err.response?.data?.message || 'Failed to send message');
     }
   }, [socket, fetchConversations, replyingTo]);
+
+  // ─── Send media message ─────────────────────────────
+  const sendMediaMessage = useCallback(async (files, content = '') => {
+    const conv = currentConversationRef.current;
+    if (!conv || files.length === 0) return;
+
+    try {
+      const parsedSender = JSON.parse(localStorage.getItem('user') || '{}');
+      const senderId = parsedSender.id || parsedSender._id;
+
+      const response = await chatApi.sendMediaMessage(conv._id, files, content, replyingTo?._id || null);
+      const savedMessage = response.data.data;
+
+      // Add from REST response
+      setMessages((prev) => [...prev, savedMessage]);
+      setReplyingTo(null);
+
+      socket?.emit('send-message', {
+        conversationId: conv._id,
+        senderId,
+        content: content || (savedMessage.attachments?.length > 1 ? '📎 Media' : savedMessage.attachments?.[0]?.type === 'video' ? '🎥 Video' : '📷 Photo'),
+        messageId: savedMessage._id,
+        replyTo: savedMessage.replyTo || null,
+        attachments: savedMessage.attachments,
+      });
+
+      fetchConversations();
+      return savedMessage;
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to send media');
+      throw err;
+    }
+  }, [socket, fetchConversations, replyingTo]);
+
+  // ─── Send voice message ─────────────────────────────
+  const sendVoiceMessage = useCallback(async (audioBlob, duration) => {
+    const conv = currentConversationRef.current;
+    if (!conv || !audioBlob) return;
+
+    try {
+      const parsedSender = JSON.parse(localStorage.getItem('user') || '{}');
+      const senderId = parsedSender.id || parsedSender._id;
+
+      const response = await chatApi.sendVoiceMessage(conv._id, audioBlob, duration);
+      const savedMessage = response.data.data;
+
+      // Add from REST response
+      setMessages((prev) => [...prev, savedMessage]);
+
+      socket?.emit('send-message', {
+        conversationId: conv._id,
+        senderId,
+        content: '🎤 Voice message',
+        messageId: savedMessage._id,
+        attachments: savedMessage.attachments,
+      });
+
+      fetchConversations();
+      return savedMessage;
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to send voice message');
+      throw err;
+    }
+  }, [socket, fetchConversations]);
 
   // ─── NEW: Edit message ─────────────────────────────
   const editMessage = useCallback(async (messageId, newContent) => {
@@ -303,6 +500,14 @@ export const ChatProvider = ({ children }) => {
     conversations, currentConversation, setCurrentConversation,
     messages, socket, onlineUsers, typingUsers, loading, error, setError,
     fetchConversations, fetchMessages, createConversation, sendMessage,
+    sendMediaMessage, sendVoiceMessage,
+
+    // Pagination
+    hasMoreMessages, isLoadingMore, loadMoreMessages,
+
+    // Unread & Pin
+    unreadCounts, totalUnread, fetchUnreadCounts, markConversationAsRead,
+    pinConversation, unpinConversation,
 
     // New feature state
     replyingTo, setReplyingTo,
@@ -319,6 +524,10 @@ export const ChatProvider = ({ children }) => {
     reactToMessage,
     forwardMessage,
     searchInConversation,
+
+    // Notification preference
+    notificationsEnabled,
+    toggleNotifications,
   };
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

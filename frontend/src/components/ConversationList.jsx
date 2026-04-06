@@ -1,10 +1,15 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Pin } from 'lucide-react';
 import { useChat } from '../context/ChatContext';
 import UserSearch from './UserSearch';
 
 export default function ConversationList() {
-  const { conversations, currentConversation, setCurrentConversation, fetchMessages, onlineUsers, loading } = useChat();
+  const { 
+    conversations, currentConversation, setCurrentConversation, fetchMessages, 
+    onlineUsers, loading, unreadCounts, fetchUnreadCounts, markConversationAsRead,
+    pinConversation, unpinConversation
+  } = useChat();
   const [searchOpen, setSearchOpen] = useState(false);
 
   const user = useMemo(() => {
@@ -18,10 +23,43 @@ export default function ConversationList() {
   // ✅ FIX: Login stores user with 'id' (not '_id'), so check both
   const currentUserId = String(user?.id || user?._id || '');
 
+  // Fetch unread counts on mount
+  useEffect(() => {
+    fetchUnreadCounts();
+  }, [fetchUnreadCounts]);
+
   const handleSelectConversation = (conversation) => {
     setCurrentConversation(conversation);
     fetchMessages(conversation._id);
+    // Mark as read when selecting
+    if (unreadCounts[conversation._id]) {
+      markConversationAsRead(conversation._id);
+    }
   };
+
+  const isPinned = (conversation) => {
+    return conversation.pinnedBy?.some(p => String(p.userId) === currentUserId);
+  };
+
+  const handlePinToggle = (e, conversation) => {
+    e.stopPropagation();
+    if (isPinned(conversation)) {
+      unpinConversation(conversation._id);
+    } else {
+      pinConversation(conversation._id);
+    }
+  };
+
+  // Sort conversations: pinned first, then by lastMessageTime
+  const sortedConversations = useMemo(() => {
+    return [...conversations].sort((a, b) => {
+      const aPinned = isPinned(a);
+      const bPinned = isPinned(b);
+      if (aPinned && !bPinned) return -1;
+      if (!aPinned && bPinned) return 1;
+      return new Date(b.lastMessageTime || 0) - new Date(a.lastMessageTime || 0);
+    });
+  }, [conversations, currentUserId]);
 
   const getOtherUser = (conversation) => {
     if (!conversation?.participants?.length) return null;
@@ -51,20 +89,20 @@ export default function ConversationList() {
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full bg-white dark:bg-dark-card transition-colors">
       <motion.div
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ delay: 0.1 }}
-        className="p-4 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-indigo-50"
+        className="p-4 border-b border-gray-100 dark:border-dark-border bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-dark-hover dark:to-dark-card"
       >
         <div className="flex items-center justify-between mb-4">
-          <h1 className="text-2xl font-bold text-gray-800">💬 Messages</h1>
+          <h1 className="text-2xl font-bold text-gray-800 dark:text-dark-text">💬 Messages</h1>
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             onClick={() => setSearchOpen(!searchOpen)}
-            className="p-2 hover:bg-white rounded-lg transition"
+            className="p-2 hover:bg-white dark:hover:bg-dark-hover rounded-lg transition"
           >
             ✏️
           </motion.button>
@@ -79,7 +117,7 @@ export default function ConversationList() {
           <input
             type="text"
             placeholder="Search or start new chat..."
-            className="w-full px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white"
+            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-dark-border focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white dark:bg-dark-bg dark:text-dark-text"
           />
         </motion.div>
       </motion.div>
@@ -91,7 +129,7 @@ export default function ConversationList() {
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.2 }}
-            className="border-b border-gray-100"
+            className="border-b border-gray-100 dark:border-dark-border"
           >
             <UserSearch onClose={() => setSearchOpen(false)} />
           </motion.div>
@@ -104,7 +142,7 @@ export default function ConversationList() {
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="flex items-center justify-center h-full text-gray-400"
+              className="flex items-center justify-center h-full text-gray-400 dark:text-dark-muted"
             >
               <div className="text-center">
                 <div className="animate-spin text-3xl mb-2">⏳</div>
@@ -115,44 +153,97 @@ export default function ConversationList() {
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="flex flex-col items-center justify-center h-full text-gray-400 p-4"
+              className="flex flex-col items-center justify-center h-full text-gray-400 dark:text-dark-muted p-4"
             >
               <div className="text-5xl mb-3">📭</div>
               <p className="font-medium">No conversations yet</p>
               <p className="text-sm">Click ✏️ to start a new chat</p>
             </motion.div>
           ) : (
-            conversations.map((conversation, idx) => (
-              <motion.div
-                key={conversation._id}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: idx * 0.05 }}
-                onClick={() => handleSelectConversation(conversation)}
-                className={`p-3 cursor-pointer transition-all border-b border-gray-50 hover:bg-gray-50 ${
-                  currentConversation?._id === conversation._id
-                    ? 'bg-blue-50 border-l-4 border-blue-500'
-                    : ''
-                }`}
-              >
-                <div className="flex items-start justify-between mb-1">
-                  <p className="font-medium text-gray-800 truncate">{getDisplayName(conversation)}</p>
-                  {isUserOnline(conversation) && (
-                    <motion.span
-                      initial={{ scale: 0 }}
-                      animate={{ scale: 1 }}
-                      className="w-2 h-2 rounded-full bg-green-500"
-                    />
+            sortedConversations.map((conversation, idx) => {
+              // Fix: user from localStorage has 'id', not '_id'
+              const otherParticipant = conversation.participants?.find(p => String(p._id) !== String(currentUserId));
+              const profilePic = otherParticipant?.profilePicture;
+              const displayName = getDisplayName(conversation);
+              const unreadCount = unreadCounts[conversation._id] || 0;
+              const pinned = isPinned(conversation);
+              
+              return (
+                <motion.div
+                  key={conversation._id}
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: idx * 0.05 }}
+                  onClick={() => handleSelectConversation(conversation)}
+                  className={`p-3 cursor-pointer transition-all border-b border-gray-50 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-dark-hover group relative ${
+                    currentConversation?._id === conversation._id
+                      ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500'
+                      : ''
+                  } ${pinned ? 'bg-amber-50/50 dark:bg-amber-900/10' : ''}`}
+                >
+                  {/* Pin indicator */}
+                  {pinned && (
+                    <div className="absolute top-1 right-1">
+                      <Pin className="w-3 h-3 text-amber-500" fill="currentColor" />
+                    </div>
                   )}
-                </div>
-                <p className="text-sm text-gray-500 truncate">
-                  {conversation.lastMessage || 'No messages yet'}
-                </p>
-                <p className="text-xs text-gray-400 mt-1">
-                  {formatConversationDate(conversation.lastMessageTime)}
-                </p>
-              </motion.div>
-            ))
+
+                  {/* Pin button (on hover) */}
+                  <button
+                    onClick={(e) => handlePinToggle(e, conversation)}
+                    className={`absolute top-1 right-1 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity ${
+                      pinned 
+                        ? 'text-amber-500 hover:bg-amber-100 dark:hover:bg-amber-900/30' 
+                        : 'text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-hover'
+                    }`}
+                    title={pinned ? 'Unpin' : 'Pin'}
+                  >
+                    <Pin className="w-3.5 h-3.5" fill={pinned ? 'currentColor' : 'none'} />
+                  </button>
+
+                  <div className="flex items-center gap-3">
+                    <div className="relative">
+                      {profilePic ? (
+                        <img
+                          src={profilePic}
+                          alt={displayName}
+                          className="w-10 h-10 rounded-full object-cover flex-shrink-0"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
+                          {(displayName?.[0] || '?').toUpperCase()}
+                        </div>
+                      )}
+                      {isUserOnline(conversation) && (
+                        <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white dark:border-dark-card rounded-full" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between mb-1">
+                        <p className={`font-medium truncate ${unreadCount > 0 ? 'text-gray-900 dark:text-white' : 'text-gray-800 dark:text-dark-text'}`}>
+                          {displayName}
+                        </p>
+                        {unreadCount > 0 && (
+                          <motion.span
+                            initial={{ scale: 0 }}
+                            animate={{ scale: 1 }}
+                            className="ml-2 min-w-[20px] h-5 px-1.5 rounded-full bg-blue-500 text-white text-xs font-bold flex items-center justify-center"
+                          >
+                            {unreadCount > 99 ? '99+' : unreadCount}
+                          </motion.span>
+                        )}
+                      </div>
+                      <p className={`text-sm truncate ${unreadCount > 0 ? 'text-gray-700 dark:text-dark-text font-medium' : 'text-gray-500 dark:text-dark-muted'}`}>
+                        {conversation.lastMessage || 'No messages yet'}
+                      </p>
+                      <p className="text-xs text-gray-400 dark:text-dark-muted mt-1">
+                      {formatConversationDate(conversation.lastMessageTime)}
+                      </p>
+                    </div>
+                  </div>
+                </motion.div>
+              );
+            })
           )}
         </AnimatePresence>
       </div>

@@ -15,6 +15,36 @@ export const chatApi = {
   markAsRead: (conversationId) =>
     API.put(`/chat/conversations/${conversationId}/read`),
 
+  // ─── Unread counts ─────────────────────────────────
+  getUnreadCounts: () => API.get('/chat/unread'),
+
+  // ─── Pin/Unpin conversations ───────────────────────
+  pinConversation: (conversationId) =>
+    API.post(`/chat/conversations/${conversationId}/pin`),
+  unpinConversation: (conversationId) =>
+    API.delete(`/chat/conversations/${conversationId}/pin`),
+
+  // ─── Media messages ────────────────────────────────
+  sendMediaMessage: (conversationId, files, content = '', replyToId = null) => {
+    const formData = new FormData();
+    files.forEach(file => formData.append('media', file));
+    if (content) formData.append('content', content);
+    if (replyToId) formData.append('replyToId', replyToId);
+    return API.post(`/chat/conversations/${conversationId}/media`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+
+  // ─── Voice messages ────────────────────────────────
+  sendVoiceMessage: (conversationId, audioBlob, duration) => {
+    const formData = new FormData();
+    formData.append('audio', audioBlob, 'voice-message.webm');
+    formData.append('duration', duration.toString());
+    return API.post(`/chat/conversations/${conversationId}/voice`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+
   // ─── NEW: Message actions ──────────────────────────
   editMessage: (messageId, content) =>
     API.patch(`/chat/messages/${messageId}`, { content }),

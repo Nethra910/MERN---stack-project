@@ -6,6 +6,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import authRoutes from './routes/authRoutes.js';
 import chatRoutes from './routes/chatRoutes.js';
+import profileRoutes from './routes/profileRoutes.js'; // ✅ NEW: Profile routes
 import errorHandler from './middleware/errorMiddleware.js';
 import { initializeSocket } from './utils/socketHandler.js';
 
@@ -95,6 +96,7 @@ app.get('/', (req, res) => {
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/profile', profileRoutes); // ✅ NEW: Profile routes
 
 // 404 Handler
 app.use((req, res) => {

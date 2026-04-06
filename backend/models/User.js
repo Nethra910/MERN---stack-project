@@ -25,6 +25,20 @@ const userSchema = new mongoose.Schema(
       minlength: [6, 'Password must be at least 6 characters'] // ✅ Added validation with message
     },
 
+    // 👤 Profile Fields
+    profilePicture: {
+      type: String,
+      default: null,
+      trim: true
+    },
+
+    bio: {
+      type: String,
+      default: '',
+      maxlength: [200, 'Bio cannot exceed 200 characters'],
+      trim: true
+    },
+
     // 🔐 Email Verification
     isVerified: {
       type: Boolean,
@@ -50,6 +64,12 @@ const userSchema = new mongoose.Schema(
     resetPasswordExpiry: {
       type: Date,
       default: null
+    },
+
+    // 🟢 Last Seen (for online status)
+    lastSeen: {
+      type: Date,
+      default: Date.now
     }
   },
   {

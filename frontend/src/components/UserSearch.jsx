@@ -67,10 +67,23 @@ export default function UserSearch({ onClose }) {
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: idx * 0.05 }}
                 onClick={() => handleSelectUser(user._id)}
-                className="p-3 bg-gray-50 rounded-lg mb-2 cursor-pointer hover:bg-gray-100 transition"
+                className="p-3 bg-gray-50 rounded-lg mb-2 cursor-pointer hover:bg-gray-100 transition flex items-center gap-3"
               >
-                <p className="font-medium text-gray-800">{user.name}</p>
-                <p className="text-xs text-gray-500">{user.email}</p>
+                {user.profilePicture ? (
+                  <img
+                    src={user.profilePicture}
+                    alt={user.name}
+                    className="w-10 h-10 rounded-full object-cover flex-shrink-0"
+                  />
+                ) : (
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
+                    {(user.name?.[0] || '?').toUpperCase()}
+                  </div>
+                )}
+                <div>
+                  <p className="font-medium text-gray-800">{user.name}</p>
+                  <p className="text-xs text-gray-500">{user.email}</p>
+                </div>
               </motion.div>
             ))}
           </motion.div>

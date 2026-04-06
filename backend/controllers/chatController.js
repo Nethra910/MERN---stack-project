@@ -4,6 +4,7 @@ import User from '../models/User.js';
 import ApiError from '../utils/ApiError.js';
 import ApiResponse from '../utils/ApiResponse.js';
 import { sanitizeInput } from '../utils/validators.js';
+import { uploadChatMedia, uploadVoiceMessage, deleteImage } from '../config/cloudinary.js';
 
 // ─── Helper ────────────────────────────────────────────
 const isParticipant = (participants, userId) =>
@@ -14,8 +15,8 @@ export const getConversations = async (req, res) => {
   try {
     const userId = req.user._id;
     const conversations = await Conversation.find({ participants: userId })
-      .populate('participants', '-password')
-      .populate('lastMessageSenderId', 'name')
+      .populate('participants', 'name email profilePicture lastSeen') // ✅ Added lastSeen
+      .populate('lastMessageSenderId', 'name profilePicture')
       .sort({ lastMessageTime: -1 })
       .lean();
 
@@ -53,7 +54,7 @@ export const createConversation = async (req, res) => {
         groupAdmin: userId,
         description: description?.trim() || null,
       });
-      await conversation.populate('participants', '-password');
+      await conversation.populate('participants', 'name email profilePicture'); // ✅ Added profilePicture
 
       return res.status(201).json(
         new ApiResponse(201, 'Group conversation created', conversation)
@@ -70,7 +71,7 @@ export const createConversation = async (req, res) => {
     let conversation = await Conversation.findOne({
       isGroup: false,
       participants: { $all: [userId, otherUserId] },
-    }).populate('participants', '-password');
+    }).populate('participants', 'name email profilePicture'); // ✅ Added profilePicture
 
     if (conversation)
       return res.status(200).json(new ApiResponse(200, 'Conversation already exists', conversation));
@@ -79,7 +80,7 @@ export const createConversation = async (req, res) => {
       participants: [userId, otherUserId],
       isGroup: false,
     });
-    await conversation.populate('participants', '-password');
+    await conversation.populate('participants', 'name email profilePicture');
 
     return res.status(201).json(new ApiResponse(201, 'Conversation created', conversation));
   } catch (err) {
@@ -102,7 +103,7 @@ export const getMessages = async (req, res) => {
       throw new ApiError(403, 'Not a participant');
 
     const messages = await Message.find({ conversationId })
-      .populate('senderId', '-password')
+      .populate('senderId', 'name email profilePicture')
       .populate('replyTo')                          // ← populate reply preview
       .sort({ createdAt: 1 })
       .limit(parseInt(limit))
@@ -171,6 +172,145 @@ export const sendMessage = async (req, res) => {
     });
 
     return res.status(201).json(new ApiResponse(201, 'Message sent', message));
+  } catch (err) {
+    if (err instanceof ApiError)
+      return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
+    return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
+  }
+};
+
+// ─── Send media message (photos/videos) ────────────────
+export const sendMediaMessage = async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const { content, replyToId } = req.body;
+    const userId = req.user._id;
+    const files = req.files;
+
+    if (!files || files.length === 0) {
+      throw new ApiError(400, 'At least one media file is required');
+    }
+
+    const conversation = await Conversation.findById(conversationId);
+    if (!conversation) throw new ApiError(404, 'Conversation not found');
+    if (!isParticipant(conversation.participants, userId))
+      throw new ApiError(403, 'Not a participant');
+
+    // Validate replyTo message belongs to same conversation
+    if (replyToId) {
+      const replyMsg = await Message.findById(replyToId);
+      if (!replyMsg || String(replyMsg.conversationId) !== String(conversationId))
+        throw new ApiError(400, 'Invalid reply target');
+    }
+
+    // Upload all media files to Cloudinary
+    const attachments = [];
+    for (const file of files) {
+      const isVideo = file.mimetype.startsWith('video/');
+      const resourceType = isVideo ? 'video' : 'image';
+      
+      // Convert buffer to base64 data URI
+      const b64 = Buffer.from(file.buffer).toString('base64');
+      const dataURI = `data:${file.mimetype};base64,${b64}`;
+      
+      const uploadResult = await uploadChatMedia(dataURI, resourceType);
+      
+      attachments.push({
+        url: uploadResult.url,
+        publicId: uploadResult.publicId,
+        type: isVideo ? 'video' : 'image',
+        mimeType: file.mimetype,
+        name: file.originalname,
+        size: file.size,
+        width: uploadResult.width,
+        height: uploadResult.height,
+        duration: uploadResult.duration,
+        thumbnail: uploadResult.thumbnail,
+      });
+    }
+
+    // Create message with attachments
+    const message = await Message.create({
+      conversationId,
+      senderId: userId,
+      content: content?.trim() || '',
+      attachments,
+      replyTo: replyToId || null,
+    });
+
+    await message.populate('senderId', 'name email profilePicture');
+    await message.populate('replyTo');
+
+    // Update conversation
+    const lastMsgText = attachments.length > 1 
+      ? `📎 ${attachments.length} media files`
+      : attachments[0].type === 'video' ? '🎥 Video' : '📷 Photo';
+    
+    await Conversation.findByIdAndUpdate(conversationId, {
+      lastMessage: content?.trim() || lastMsgText,
+      lastMessageSenderId: userId,
+      lastMessageTime: new Date(),
+    });
+
+    return res.status(201).json(new ApiResponse(201, 'Media message sent', message));
+  } catch (err) {
+    if (err instanceof ApiError)
+      return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
+    return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
+  }
+};
+
+// ─── Send voice message ────────────────────────────────
+export const sendVoiceMessage = async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const { duration } = req.body;
+    const userId = req.user._id;
+    const file = req.file;
+
+    if (!file) {
+      throw new ApiError(400, 'Audio file is required');
+    }
+
+    const conversation = await Conversation.findById(conversationId);
+    if (!conversation) throw new ApiError(404, 'Conversation not found');
+    if (!isParticipant(conversation.participants, userId))
+      throw new ApiError(403, 'Not a participant');
+
+    // Convert buffer to base64 data URI
+    const b64 = Buffer.from(file.buffer).toString('base64');
+    const dataURI = `data:${file.mimetype};base64,${b64}`;
+    
+    const uploadResult = await uploadVoiceMessage(dataURI);
+
+    const attachment = {
+      url: uploadResult.url,
+      publicId: uploadResult.publicId,
+      type: 'audio',
+      mimeType: file.mimetype,
+      name: file.originalname || 'voice-message.webm',
+      size: file.size,
+      duration: duration ? parseFloat(duration) : uploadResult.duration,
+    };
+
+    // Create message with voice attachment
+    const message = await Message.create({
+      conversationId,
+      senderId: userId,
+      content: '',
+      attachments: [attachment],
+    });
+
+    await message.populate('senderId', 'name email profilePicture');
+
+    // Update conversation
+    await Conversation.findByIdAndUpdate(conversationId, {
+      lastMessage: '🎤 Voice message',
+      lastMessageSenderId: userId,
+      lastMessageTime: new Date(),
+    });
+
+    return res.status(201).json(new ApiResponse(201, 'Voice message sent', message));
   } catch (err) {
     if (err instanceof ApiError)
       return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
@@ -413,12 +553,103 @@ export const markAsRead = async (req, res) => {
     if (!isParticipant(conversation.participants, userId))
       throw new ApiError(403, 'Not a participant');
 
+    // Update lastReadAt for this user
+    await Conversation.findByIdAndUpdate(conversationId, {
+      $set: { [`lastReadAt.${userId}`]: new Date() }
+    });
+
     await Message.updateMany(
       { conversationId, senderId: { $ne: userId }, isRead: false },
       { $set: { isRead: true }, $addToSet: { readBy: { userId, readAt: new Date() } } }
     );
 
     return res.status(200).json(new ApiResponse(200, 'Messages marked as read'));
+  } catch (err) {
+    if (err instanceof ApiError)
+      return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
+    return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
+  }
+};
+
+// ─── Get unread counts ─────────────────────────────────
+export const getUnreadCounts = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    
+    const conversations = await Conversation.find({ participants: userId }).lean();
+    const unreadCounts = {};
+    let totalUnread = 0;
+
+    for (const conv of conversations) {
+      const lastReadAt = conv.lastReadAt?.get?.(String(userId)) || conv.lastReadAt?.[String(userId)] || new Date(0);
+      
+      const count = await Message.countDocuments({
+        conversationId: conv._id,
+        senderId: { $ne: userId },
+        createdAt: { $gt: lastReadAt },
+        $or: [
+          { isDeleted: false },
+          { isDeleted: { $exists: false } }
+        ]
+      });
+
+      if (count > 0) {
+        unreadCounts[conv._id] = count;
+        totalUnread += count;
+      }
+    }
+
+    return res.status(200).json(new ApiResponse(200, 'Unread counts fetched', { unreadCounts, totalUnread }));
+  } catch (err) {
+    return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
+  }
+};
+
+// ─── Pin conversation ──────────────────────────────────
+export const pinConversation = async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const userId = req.user._id;
+
+    const conversation = await Conversation.findById(conversationId);
+    if (!conversation) throw new ApiError(404, 'Conversation not found');
+    if (!isParticipant(conversation.participants, userId))
+      throw new ApiError(403, 'Not a participant');
+
+    // Check if already pinned
+    const alreadyPinned = conversation.pinnedBy?.some(p => p.userId?.equals(userId));
+    if (alreadyPinned) {
+      return res.status(200).json(new ApiResponse(200, 'Already pinned'));
+    }
+
+    await Conversation.findByIdAndUpdate(conversationId, {
+      $push: { pinnedBy: { userId, pinnedAt: new Date() } }
+    });
+
+    return res.status(200).json(new ApiResponse(200, 'Conversation pinned'));
+  } catch (err) {
+    if (err instanceof ApiError)
+      return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
+    return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
+  }
+};
+
+// ─── Unpin conversation ────────────────────────────────
+export const unpinConversation = async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const userId = req.user._id;
+
+    const conversation = await Conversation.findById(conversationId);
+    if (!conversation) throw new ApiError(404, 'Conversation not found');
+    if (!isParticipant(conversation.participants, userId))
+      throw new ApiError(403, 'Not a participant');
+
+    await Conversation.findByIdAndUpdate(conversationId, {
+      $pull: { pinnedBy: { userId } }
+    });
+
+    return res.status(200).json(new ApiResponse(200, 'Conversation unpinned'));
   } catch (err) {
     if (err instanceof ApiError)
       return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
@@ -496,7 +727,7 @@ export const addParticipant = async (req, res) => {
 
     conversation.participants.push(newUserId);
     await conversation.save();
-    await conversation.populate('participants', '-password');
+    await conversation.populate('participants', 'name email profilePicture');
 
     return res.status(200).json(new ApiResponse(200, 'Participant added', conversation));
   } catch (err) {
@@ -532,7 +763,7 @@ export const removeParticipant = async (req, res) => {
     }
 
     await conversation.save();
-    await conversation.populate('participants', '-password');
+    await conversation.populate('participants', 'name email profilePicture');
 
     return res.status(200).json(new ApiResponse(200, 'Participant removed', conversation));
   } catch (err) {

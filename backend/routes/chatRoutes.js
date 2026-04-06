@@ -1,16 +1,22 @@
 import express from 'express';
 import protect from '../middleware/authMiddleware.js';
+import { uploadChatMedia, uploadVoiceMessage, handleMulterError } from '../middleware/uploadMiddleware.js';
 import {
   getConversations,
   createConversation,
   getMessages,
   sendMessage,
+  sendMediaMessage,
+  sendVoiceMessage,
   editMessage,
   deleteMessage,
   reactToMessage,
   forwardMessage,
   searchMessages,
   markAsRead,
+  getUnreadCounts,
+  pinConversation,
+  unpinConversation,
   searchUsers,
   deleteConversation,
   addParticipant,
@@ -27,10 +33,19 @@ router.get('/conversations', getConversations);
 router.post('/conversations', createConversation);
 router.delete('/conversations/:conversationId', deleteConversation);
 
+// ─── Unread counts ─────────────────────────────────────
+router.get('/unread', getUnreadCounts);
+
 // ─── Message routes ────────────────────────────────────
 router.get('/conversations/:conversationId/messages', getMessages);
 router.post('/conversations/:conversationId/messages', sendMessage);
+router.post('/conversations/:conversationId/media', uploadChatMedia, handleMulterError, sendMediaMessage);
+router.post('/conversations/:conversationId/voice', uploadVoiceMessage, handleMulterError, sendVoiceMessage);
 router.put('/conversations/:conversationId/read', markAsRead);
+
+// ─── Pin/Unpin conversations ───────────────────────────
+router.post('/conversations/:conversationId/pin', pinConversation);
+router.delete('/conversations/:conversationId/pin', unpinConversation);
 
 // ─── Message search ────────────────────────────────────
 router.get('/conversations/:conversationId/search', searchMessages);

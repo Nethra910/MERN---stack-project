@@ -223,7 +223,7 @@ export const login = async (req, res) => {
 
     const token = generateToken(user._id);
 
-    // ✅ FIXED: Return proper nested structure for frontend
+    // ✅ Return complete user data including profile fields
     return res
       .status(200)
       .json(new ApiResponse(200, 'Login successful', {
@@ -232,7 +232,9 @@ export const login = async (req, res) => {
           id: user._id, 
           name: user.name, 
           email: user.email,
-          isVerified: user.isVerified
+          isVerified: user.isVerified,
+          profilePicture: user.profilePicture || null,
+          bio: user.bio || ''
         },
       }));
 

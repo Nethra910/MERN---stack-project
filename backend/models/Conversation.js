@@ -45,6 +45,25 @@ const conversationSchema = new mongoose.Schema(
       default: null,
       maxlength: [500, 'Description exceeds maximum length'],
     },
+    // 📌 Pin conversations per user
+    pinnedBy: [
+      {
+        userId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+        },
+        pinnedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
+    // 📖 Track when each user last read the conversation
+    lastReadAt: {
+      type: Map,
+      of: Date,
+      default: {},
+    },
   },
   {
     timestamps: true,
