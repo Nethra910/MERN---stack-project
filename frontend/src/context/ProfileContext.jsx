@@ -14,7 +14,7 @@ export const ProfileProvider = ({ children }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
 
   // Get user and token from localStorage
   const getUser = () => JSON.parse(localStorage.getItem('user') || '{}');
@@ -34,7 +34,7 @@ export const ProfileProvider = ({ children }) => {
   const apiCall = async (endpoint, options = {}) => {
     const token = getToken();
     
-    const response = await fetch(`${API_URL}/api/profile${endpoint}`, {
+    const response = await fetch(`${API_URL}/profile${endpoint}`, {
       ...options,
       headers: {
         'Authorization': `Bearer ${token}`,

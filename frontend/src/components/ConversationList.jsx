@@ -1,10 +1,13 @@
 import { useMemo, useState, useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Pin } from 'lucide-react';
 import { useChat } from '../context/ChatContext';
 import UserSearch from './UserSearch';
 
 export default function ConversationList() {
+  const navigate = useNavigate();
+  const { chatId } = useParams();
   const { 
     conversations, currentConversation, setCurrentConversation, fetchMessages, 
     onlineUsers, loading, unreadCounts, fetchUnreadCounts, markConversationAsRead,
@@ -35,6 +38,7 @@ export default function ConversationList() {
     if (unreadCounts[conversation._id]) {
       markConversationAsRead(conversation._id);
     }
+    navigate(`/messages/chat/${conversation._id}`);
   };
 
   const isPinned = (conversation) => {
@@ -176,7 +180,7 @@ export default function ConversationList() {
                   transition={{ delay: idx * 0.05 }}
                   onClick={() => handleSelectConversation(conversation)}
                   className={`p-3 cursor-pointer transition-all border-b border-gray-50 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-dark-hover group relative ${
-                    currentConversation?._id === conversation._id
+                    String(chatId || currentConversation?._id) === String(conversation._id)
                       ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500'
                       : ''
                   } ${pinned ? 'bg-amber-50/50 dark:bg-amber-900/10' : ''}`}

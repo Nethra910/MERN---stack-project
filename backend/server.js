@@ -38,6 +38,9 @@ const io = new Server(server, {
     origin: [
       'http://localhost:5173',
       'http://localhost:3000',
+      'http://localhost:5002',
+      'http://localhost:5003',
+      'http://localhost:5004',
       process.env.CLIENT_URL,
     ].filter(Boolean),
     credentials: true,
@@ -57,6 +60,9 @@ app.use((req, res, next) => {
   const allowedOrigins = [
     'http://localhost:5173',
     'http://localhost:3000',
+    'http://localhost:5002',
+    'http://localhost:5003',
+    'http://localhost:5004',
     process.env.CLIENT_URL,
   ].filter(Boolean);
 

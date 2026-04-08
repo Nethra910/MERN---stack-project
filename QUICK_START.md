@@ -21,7 +21,7 @@ npm run dev
 cd /Users/kodurunirmalnethra/Desktop/Auth/frontend
 npm run dev
 ```
-✅ Frontend should start on http://localhost:5173
+✅ Frontend should start on http://localhost:5002
 
 ### Step 4: Login and Explore! 🎉
 
