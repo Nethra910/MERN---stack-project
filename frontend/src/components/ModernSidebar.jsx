@@ -107,7 +107,7 @@ export default function ModernSidebar() {
               className={({ isActive }) =>
                 `w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 group ${
                   isActive
-                    ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 shadow-sm'
+                    ? 'bg-[#DBEAFE] dark:bg-blue-900/30 text-[#2563EB] dark:text-blue-400 shadow-sm'
                     : 'text-gray-700 dark:text-dark-text hover:bg-gray-50 dark:hover:bg-dark-hover'
                 }`
               }
@@ -116,10 +116,10 @@ export default function ModernSidebar() {
                 <motion.div whileHover={{ x: 4 }} whileTap={{ scale: 0.98 }} className="flex items-center gap-3 w-full">
                   <div className="relative">
                     <Icon
-                      className={`w-5 h-5 ${isActive ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 dark:text-dark-muted group-hover:text-gray-600 dark:group-hover:text-dark-text'}`}
+                      className={`w-5 h-5 ${isActive ? 'text-[#2563EB] dark:text-blue-400' : 'text-gray-400 dark:text-dark-muted group-hover:text-gray-600 dark:group-hover:text-dark-text'}`}
                     />
                     {showBadge && (
-                      <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                      <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-[#2563EB] text-white text-[10px] font-bold flex items-center justify-center">
                         {totalUnread > 99 ? '99+' : totalUnread}
                       </span>
                     )}
@@ -128,7 +128,7 @@ export default function ModernSidebar() {
                   {isActive && (
                     <motion.div
                       layoutId="activeIndicator"
-                      className="ml-auto w-1.5 h-1.5 rounded-full bg-blue-600 dark:bg-blue-400"
+                      className="ml-auto w-1.5 h-1.5 rounded-full bg-[#2563EB] dark:bg-blue-400"
                     />
                   )}
                 </motion.div>

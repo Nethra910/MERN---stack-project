@@ -274,18 +274,18 @@ export default function MessageInput() {
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.15 }}
             className={`flex items-center justify-between px-4 py-2 border-b ${
-              isEdit ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800' : 'bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-800'
+              isEdit ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800' : 'bg-[#DBEAFE] dark:bg-blue-900/20 border-[#2563EB] dark:border-blue-800'
             }`}
           >
             <div className="flex items-center gap-2 min-w-0">
-              <span className={`text-lg flex-shrink-0 ${isEdit ? 'text-amber-500' : 'text-blue-500'}`}>
+              <span className={`text-lg flex-shrink-0 ${isEdit ? 'text-amber-500' : 'text-[#2563EB]'}`}>
                 {isEdit ? '✏️' : '↩️'}
               </span>
               <div className="min-w-0">
-                <p className={`text-xs font-semibold ${isEdit ? 'text-amber-700' : 'text-blue-700'}`}>
+                <p className={`text-xs font-semibold ${isEdit ? 'text-amber-700' : 'text-[#2563EB]'}`}>
                   {isEdit ? 'Editing message' : `Replying to ${replyingTo?.senderId?.name || 'message'}`}
                 </p>
-                <p className={`text-xs truncate ${isEdit ? 'text-amber-600' : 'text-blue-600'}`}>
+                <p className={`text-xs truncate ${isEdit ? 'text-amber-600' : 'text-[#2563EB]'}`}>
                   {(isEdit ? editingMessage?.content : replyingTo?.content)?.slice(0, 60)}
                 </p>
               </div>
@@ -293,7 +293,7 @@ export default function MessageInput() {
             <button
               onClick={handleCancel}
               className={`flex-shrink-0 p-1 rounded-full ${
-                isEdit ? 'hover:bg-amber-200 text-amber-500' : 'hover:bg-blue-200 text-blue-500'
+                isEdit ? 'hover:bg-amber-200 text-amber-500' : 'hover:bg-[#BFDBFE] text-[#2563EB]'
               } transition`}
             >
               ✕
@@ -461,7 +461,7 @@ export default function MessageInput() {
                       disabled={isUploading}
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
-                      className="flex items-center gap-2 px-5 py-2 text-sm font-medium rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 text-white shadow-lg shadow-blue-200 hover:shadow-blue-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="flex items-center gap-2 px-5 py-2 text-sm font-medium rounded-full bg-[#2563EB] text-white shadow-lg shadow-blue-200 hover:bg-[#1D4ED8] hover:shadow-blue-300 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {isUploading ? (
                         <>
@@ -557,7 +557,7 @@ export default function MessageInput() {
           className={`flex-1 px-4 py-2.5 rounded-xl border text-sm outline-none transition disabled:bg-gray-50 dark:disabled:bg-dark-hover disabled:text-gray-400 dark:disabled:text-dark-muted ${
             isEdit
               ? 'border-amber-300 dark:border-amber-700 focus:ring-2 focus:ring-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:text-dark-text'
-              : 'border-gray-200 dark:border-dark-border focus:ring-2 focus:ring-blue-300 bg-white dark:bg-dark-bg dark:text-dark-text dark:placeholder:text-dark-muted'
+              : 'border-gray-200 dark:border-dark-border focus:ring-2 focus:ring-[#2563EB] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.15)] bg-white dark:bg-dark-bg dark:text-dark-text dark:placeholder:text-dark-muted'
           }`}
         />
         
@@ -571,7 +571,7 @@ export default function MessageInput() {
               className={`relative px-5 py-2.5 rounded-xl font-semibold text-sm text-white disabled:opacity-40 disabled:cursor-not-allowed overflow-hidden ${
                 isEdit
                   ? 'bg-amber-500 hover:bg-amber-600'
-                  : 'bg-blue-500 hover:bg-blue-600'
+                  : 'bg-[#2563EB] hover:bg-[#1D4ED8]'
               }`}
               initial={{ scale: 1 }}
               whileHover={{ scale: 1.05 }}
@@ -611,7 +611,7 @@ export default function MessageInput() {
             <motion.div
               key="morphing-bubble"
               className={`absolute right-3 px-5 py-2.5 rounded-xl font-semibold text-sm text-white ${
-                isEdit ? 'bg-amber-500' : 'bg-blue-500'
+                isEdit ? 'bg-amber-500' : 'bg-[#2563EB]'
               }`}
               initial={{
                 scale: 1,
@@ -652,7 +652,7 @@ export default function MessageInput() {
               
               {/* Liquid blob effect */}
               <motion.div
-                className={`absolute inset-0 ${isEdit ? 'bg-amber-400' : 'bg-blue-400'} rounded-full`}
+                className={`absolute inset-0 ${isEdit ? 'bg-amber-400' : 'bg-[#1D4ED8]'} rounded-full`}
                 animate={{
                   scale: [1, 1.5, 0.8, 1.3],
                   borderRadius: ['50%', '40% 60% 70% 30%', '60% 40% 30% 70%', '50%'],

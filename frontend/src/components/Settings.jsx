@@ -99,7 +99,7 @@ export default function Settings() {
           label: 'Read Receipts',
           description: 'Let others know when you\'ve read their messages',
           icon: Eye,
-          iconColor: 'text-blue-500',
+          iconColor: 'text-[#2563EB]',
           comingSoon: true
         },
         {
@@ -188,7 +188,7 @@ export default function Settings() {
                           <div 
                             className={`w-12 h-7 rounded-full p-1 transition-colors ${
                               item.isActive 
-                                ? 'bg-blue-500' 
+                                  ? 'bg-[#2563EB]' 
                                 : 'bg-gray-300 dark:bg-dark-hover'
                             }`}
                           >

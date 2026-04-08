@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import DOMPurify from 'dompurify';
 import { useChat } from '../context/ChatContext';
@@ -31,7 +32,7 @@ const parseReactions = (reactions) => {
 };
 
 // ─── Single Message Bubble ────────────────────────────
-function MessageBubble({ msg, isMine, currentUserId, onReply, onEdit, onDelete, onForward, onReact }) {
+function MessageBubble({ msg, isMine, currentUserId, readStatus, onReply, onEdit, onDelete, onForward, onReact, onViewHistory }) {
   const [menuOpen, setMenuOpen]         = useState(false);
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const menuRef = useRef(null);
@@ -129,6 +130,9 @@ function MessageBubble({ msg, isMine, currentUserId, onReply, onEdit, onDelete, 
                   <MenuItem icon="➡️" label="Forward" onClick={() => { onForward(msg); setMenuOpen(false); }} />
                   {isMine && !msg.isDeleted && (
                     <MenuItem icon="✏️" label="Edit" onClick={() => { onEdit(msg); setMenuOpen(false); }} />
+                  )}
+                  {msg.isEdited && msg.editHistory?.length > 0 && (
+                    <MenuItem icon="🕘" label="Edit history" onClick={() => { onViewHistory(msg); setMenuOpen(false); }} />
                   )}
                   {!msg.isDeleted && (
                     <>
@@ -233,8 +237,30 @@ function MessageBubble({ msg, isMine, currentUserId, onReply, onEdit, onDelete, 
                   {formatTime(msg)}
                 </span>
                 {msg.isEdited && !isDeleted && (
-                  <span className={`text-xs ${isMine ? 'text-blue-200' : 'text-gray-400'}`}>
-                    · edited
+                  msg.editHistory?.length > 0 ? (
+                    <button
+                      onClick={() => onViewHistory(msg)}
+                      className="text-xs text-[#2563EB] hover:text-[#1D4ED8] hover:underline"
+                    >
+                      · edited
+                    </button>
+                  ) : (
+                    <span className={`text-xs ${isMine ? 'text-blue-200' : 'text-gray-400'}`}>
+                      · edited
+                    </span>
+                  )
+                )}
+                {isMine && readStatus && !isDeleted && (
+                  <span className="text-xs">
+                    {readStatus.state === 'sent' && (
+                      <span className="text-gray-400"> · ✓</span>
+                    )}
+                    {(readStatus.state === 'read' || readStatus.state === 'read-count') && (
+                      <span className="text-[#2563EB]"> · ✓✓</span>
+                    )}
+                    {readStatus.state === 'read-count' && (
+                      <span className="text-[#2563EB]"> {readStatus.count}</span>
+                    )}
                   </span>
                 )}
               </div>
@@ -250,7 +276,7 @@ function MessageBubble({ msg, isMine, currentUserId, onReply, onEdit, onDelete, 
                       onClick={() => onReact(msg._id, emoji)}
                       className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs border transition-all ${
                         users.includes(currentUserId) || users.map(String).includes(String(currentUserId))
-                          ? 'bg-blue-100 border-blue-300 text-blue-700'
+                          ? 'bg-[#DBEAFE] border-[#2563EB] text-[#2563EB]'
                           : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
                       }`}
                     >
@@ -327,7 +353,7 @@ function ForwardModal({ message, conversations, onForward, onClose, currentUserI
                 type="checkbox"
                 checked={selected.includes(conv._id)}
                 onChange={() => toggle(conv._id)}
-                className="w-4 h-4 accent-blue-500"
+                className="w-4 h-4 accent-[#2563EB]"
               />
               <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center text-white font-bold text-sm">
                 {getConvName(conv)[0]?.toUpperCase()}
@@ -347,7 +373,7 @@ function ForwardModal({ message, conversations, onForward, onClose, currentUserI
           <button
             disabled={selected.length === 0}
             onClick={() => onForward(message._id, selected)}
-            className="flex-1 py-2 rounded-xl bg-blue-500 text-white font-medium text-sm disabled:opacity-50 hover:bg-blue-600 transition"
+            className="flex-1 py-2 rounded-xl bg-[#2563EB] text-white font-medium text-sm disabled:opacity-50 hover:bg-[#1D4ED8] transition"
           >
             Forward{selected.length > 0 ? ` (${selected.length})` : ''}
           </button>
@@ -385,7 +411,7 @@ function SearchBar({ onSearch, onClose, results, loading, onJumpTo }) {
             placeholder="Search messages..."
             value={query}
             onChange={handleChange}
-            className="flex-1 text-sm outline-none bg-transparent text-gray-700 dark:text-dark-text placeholder:text-gray-400 dark:placeholder:text-dark-muted"
+            className="flex-1 text-sm outline-none bg-transparent text-gray-700 dark:text-dark-text placeholder:text-gray-400 dark:placeholder:text-dark-muted focus:ring-2 focus:ring-[#2563EB] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.15)] rounded"
           />
           {loading && <span className="text-gray-400 dark:text-dark-muted text-xs">...</span>}
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-dark-text text-sm">✕</button>
@@ -413,6 +439,57 @@ function SearchBar({ onSearch, onClose, results, loading, onJumpTo }) {
   );
 }
 
+function EditHistoryModal({ message, onClose }) {
+  const history = message?.editHistory || [];
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.9, y: 20 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.9, y: 20 }}
+        onClick={(e) => e.stopPropagation()}
+        className="bg-white dark:bg-dark-card rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+      >
+        <div className="p-4 border-b border-gray-100 dark:border-dark-border">
+          <h3 className="font-bold text-gray-800 dark:text-dark-text text-lg">Edit history</h3>
+          <p className="text-xs text-gray-500 dark:text-dark-muted mt-0.5">Previous versions</p>
+        </div>
+        <div className="max-h-80 overflow-y-auto p-4 space-y-3">
+          {history.length === 0 ? (
+            <p className="text-sm text-gray-500 dark:text-dark-muted">No history available.</p>
+          ) : (
+            history
+              .slice()
+              .reverse()
+              .map((entry, idx) => (
+                <div key={idx} className="p-3 rounded-xl border border-gray-100 dark:border-dark-border">
+                  <p className="text-sm text-gray-800 dark:text-dark-text whitespace-pre-wrap">{entry.content || '(empty)'}</p>
+                  <p className="text-xs text-gray-400 dark:text-dark-muted mt-2">
+                    {entry.editedAt ? new Date(entry.editedAt).toLocaleString() : 'Unknown time'}
+                  </p>
+                </div>
+              ))
+          )}
+        </div>
+        <div className="p-4 border-t border-gray-100 dark:border-dark-border">
+          <button
+            onClick={onClose}
+            className="w-full py-2 rounded-xl bg-gray-100 dark:bg-dark-hover text-gray-700 dark:text-dark-text text-sm font-medium hover:bg-gray-200 dark:hover:bg-dark-card transition"
+          >
+            Close
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ─── Main ChatWindow ──────────────────────────────────
 export default function ChatWindow() {
   const {
@@ -430,6 +507,10 @@ export default function ChatWindow() {
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [highlightedId, setHighlightedId] = useState(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyMessage, setHistoryMessage] = useState(null);
+  const location = useLocation();
+  const navigate = useNavigate();
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const messageRefs    = useRef({});
@@ -439,6 +520,37 @@ export default function ChatWindow() {
     try { return JSON.parse(localStorage.getItem('user') || '{}'); } catch { return {}; }
   }, []);
   const currentUserId = String(user?.id || user?._id || '');
+  const lastReadAt = useMemo(() => {
+    const raw = currentConversation?.lastReadAt;
+    if (!raw) return null;
+    if (typeof raw.get === 'function') return raw.get(currentUserId) || null;
+    return raw[currentUserId] || null;
+  }, [currentConversation, currentUserId]);
+
+  const unreadCount = useMemo(() => {
+    if (!messages.length) return 0;
+    const lastRead = lastReadAt ? new Date(lastReadAt) : null;
+    return messages.filter((m) => {
+      const senderId = typeof m.senderId === 'object' ? String(m.senderId?._id) : String(m.senderId);
+      if (senderId === currentUserId) return false;
+      if (!lastRead) return true;
+      const createdAt = new Date(m.createdAt || m.timestamp);
+      return createdAt > lastRead;
+    }).length;
+  }, [messages, lastReadAt, currentUserId]);
+
+  const firstUnreadMessageId = useMemo(() => {
+    if (!messages.length) return null;
+    const lastRead = lastReadAt ? new Date(lastReadAt) : null;
+    const unread = messages.find((m) => {
+      const senderId = typeof m.senderId === 'object' ? String(m.senderId?._id) : String(m.senderId);
+      if (senderId === currentUserId) return false;
+      if (!lastRead) return true;
+      const createdAt = new Date(m.createdAt || m.timestamp);
+      return createdAt > lastRead;
+    });
+    return unread?._id || null;
+  }, [messages, lastReadAt, currentUserId]);
 
   // Scroll to bottom when new messages arrive
   useEffect(() => {
@@ -513,6 +625,18 @@ export default function ChatWindow() {
     setTimeout(() => setHighlightedId(null), 2000);
   }, []);
 
+  const handleJumpToFirstUnread = useCallback(() => {
+    if (!firstUnreadMessageId) return;
+    handleJumpTo(firstUnreadMessageId);
+  }, [firstUnreadMessageId, handleJumpTo]);
+
+  useEffect(() => {
+    if (location.state?.jumpToFirstUnread && firstUnreadMessageId) {
+      handleJumpToFirstUnread();
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location, firstUnreadMessageId, handleJumpToFirstUnread, navigate]);
+
   if (!currentConversation) {
     return (
       <motion.div
@@ -551,12 +675,22 @@ export default function ChatWindow() {
         </div>
 
         {/* Search toggle */}
-        <button
-          onClick={() => setSearchOpen((v) => !v)}
-          className={`p-2 rounded-lg text-sm transition ${searchOpen ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' : 'hover:bg-gray-100 dark:hover:bg-dark-hover text-gray-500 dark:text-dark-muted'}`}
-        >
-          🔍
-        </button>
+        <div className="flex items-center gap-2">
+          {firstUnreadMessageId && (
+            <button
+              onClick={handleJumpToFirstUnread}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#DBEAFE] text-[#2563EB] hover:bg-[#BFDBFE] transition"
+            >
+              First unread{unreadCount > 0 ? ` (${unreadCount})` : ''}
+            </button>
+          )}
+          <button
+            onClick={() => setSearchOpen((v) => !v)}
+            className={`p-2 rounded-lg text-sm transition ${searchOpen ? 'bg-[#DBEAFE] dark:bg-blue-900/30 text-[#2563EB] dark:text-blue-400' : 'hover:bg-gray-100 dark:hover:bg-dark-hover text-gray-500 dark:text-dark-muted'}`}
+          >
+            🔍
+          </button>
+        </div>
       </div>
 
       {/* ─── Search bar ──────────────────────────────── */}
@@ -605,6 +739,18 @@ export default function ChatWindow() {
           const senderId = typeof msg.senderId === 'object' ? String(msg.senderId?._id) : String(msg.senderId);
           const isMine = senderId === currentUserId;
           const isHighlighted = highlightedId === msg._id;
+          const readByList = Array.isArray(msg.readBy) ? msg.readBy : [];
+          const readByOthers = readByList.filter((entry) => {
+            const userId = entry?.userId || entry;
+            return String(userId) !== currentUserId;
+          });
+          const readStatus = isMine
+            ? (readByOthers.length > 0
+              ? (currentConversation?.isGroup
+                ? { state: 'read-count', count: readByOthers.length }
+                : { state: 'read' })
+              : { state: 'sent' })
+            : null;
 
           // Skip messages deleted "for everyone"
           // OR messages where current user deleted it "for me" (self)
@@ -620,17 +766,19 @@ export default function ChatWindow() {
             <div
               key={msg._id || idx}
               ref={(el) => { if (el) messageRefs.current[msg._id] = el; }}
-              className={`transition-all duration-500 rounded-xl ${isHighlighted ? 'bg-yellow-100 scale-105' : ''}`}
+              className={`transition-all duration-500 rounded-xl ${isHighlighted ? 'bg-[#DBEAFE] scale-105' : ''}`}
             >
               <MessageBubble
                 msg={msg}
                 isMine={isMine}
                 currentUserId={currentUserId}
+                readStatus={readStatus}
                 onReply={setReplyingTo}
                 onEdit={setEditingMessage}
                 onDelete={deleteMessage}
                 onForward={(msg) => { setMessageToForward(msg); setForwardModalOpen(true); }}
                 onReact={reactToMessage}
+                onViewHistory={(msg) => { setHistoryMessage(msg); setHistoryOpen(true); }}
               />
             </div>
           );
@@ -645,13 +793,13 @@ export default function ChatWindow() {
               exit={{ opacity: 0 }}
               className="flex items-center gap-2 px-2"
             >
-              <div className="bg-gray-200 px-3 py-2 rounded-2xl flex gap-1">
+              <div className="bg-[#DBEAFE] px-3 py-2 rounded-2xl flex gap-1">
                 {[0, 1, 2].map((i) => (
                   <motion.div
                     key={i}
                     animate={{ y: [0, -5, 0] }}
                     transition={{ delay: i * 0.12, duration: 0.5, repeat: Infinity }}
-                    className="w-1.5 h-1.5 rounded-full bg-gray-500"
+                    className="w-1.5 h-1.5 rounded-full bg-[#2563EB]"
                   />
                 ))}
               </div>
@@ -675,6 +823,15 @@ export default function ChatWindow() {
             currentUserId={currentUserId}
             onForward={forwardMessage}
             onClose={() => { setForwardModalOpen(false); setMessageToForward(null); }}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {historyOpen && historyMessage && (
+          <EditHistoryModal
+            message={historyMessage}
+            onClose={() => { setHistoryOpen(false); setHistoryMessage(null); }}
           />
         )}
       </AnimatePresence>

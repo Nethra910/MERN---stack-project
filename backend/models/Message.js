@@ -58,6 +58,19 @@ const messageSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    editHistory: [
+      {
+        content: {
+          type: String,
+          trim: true,
+          maxlength: [5000, 'Message exceeds maximum length'],
+        },
+        editedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
 
     // ─── Soft delete ──────────────────────────────────
     isDeleted: {

@@ -314,9 +314,9 @@ export default function ModernProfile() {
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
-                    className={`flex items-center gap-2 px-6 py-4 font-medium transition relative ${
+                    className={`flex items-center gap-2 px-6 py-4 font-medium transition relative rounded-md ${
                       activeTab === tab.id
-                        ? 'text-blue-600'
+                        ? 'text-[#2563EB] bg-[#DBEAFE]'
                         : 'text-gray-500 hover:text-gray-700'
                     }`}
                   >
@@ -325,7 +325,7 @@ export default function ModernProfile() {
                     {activeTab === tab.id && (
                       <motion.div
                         layoutId="activeTab"
-                        className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"
+                        className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#2563EB]"
                         transition={{ type: 'spring', stiffness: 500, damping: 30 }}
                       />
                     )}
@@ -359,13 +359,13 @@ export default function ModernProfile() {
                       type="text"
                       value={nameInput}
                       onChange={(e) => setNameInput(e.target.value)}
-                      className="flex-1 px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="flex-1 px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#2563EB] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.15)] outline-none"
                       placeholder="Enter your name"
                     />
                     <button
                       onClick={handleSaveName}
                       disabled={isLoading}
-                      className="p-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition disabled:opacity-50"
+                      className="p-2 bg-[#2563EB] text-white rounded-lg hover:bg-[#1D4ED8] transition disabled:opacity-50"
                     >
                       {isLoading ? <Loader className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
                     </button>
@@ -384,7 +384,7 @@ export default function ModernProfile() {
                     <span className="text-gray-900">{user?.name || 'Not set'}</span>
                     <button
                       onClick={() => setIsEditingName(true)}
-                      className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                      className="p-2 text-[#2563EB] hover:bg-[#DBEAFE] rounded-lg transition"
                     >
                       <Edit2 className="w-4 h-4" />
                     </button>
@@ -418,14 +418,14 @@ export default function ModernProfile() {
                       onChange={(e) => setBioInput(e.target.value)}
                       maxLength={200}
                       rows={4}
-                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#2563EB] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.15)] outline-none resize-none"
                       placeholder="Tell us about yourself..."
                     />
                     <div className="flex items-center gap-2 mt-2">
                       <button
                         onClick={handleSaveBio}
                         disabled={isLoading}
-                        className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition disabled:opacity-50 flex items-center gap-2"
+                        className="px-4 py-2 bg-[#2563EB] text-white rounded-lg hover:bg-[#1D4ED8] transition disabled:opacity-50 flex items-center gap-2"
                       >
                         {isLoading ? <Loader className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                         Save
@@ -448,7 +448,7 @@ export default function ModernProfile() {
                     </div>
                     <button
                       onClick={() => setIsEditingBio(true)}
-                      className="absolute top-2 right-2 p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                      className="absolute top-2 right-2 p-2 text-[#2563EB] hover:bg-[#DBEAFE] rounded-lg transition"
                     >
                       <Edit2 className="w-4 h-4" />
                     </button>
@@ -484,7 +484,7 @@ export default function ModernProfile() {
                         type={showPasswords.old ? 'text' : 'password'}
                         value={passwordForm.oldPassword}
                         onChange={(e) => setPasswordForm({ ...passwordForm, oldPassword: e.target.value })}
-                        className="w-full px-4 py-2 pr-10 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="w-full px-4 py-2 pr-10 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#2563EB] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.15)] outline-none"
                         placeholder="Enter current password"
                       />
                       <button
@@ -507,7 +507,7 @@ export default function ModernProfile() {
                         type={showPasswords.new ? 'text' : 'password'}
                         value={passwordForm.newPassword}
                         onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
-                        className="w-full px-4 py-2 pr-10 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="w-full px-4 py-2 pr-10 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#2563EB] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.15)] outline-none"
                         placeholder="Enter new password"
                       />
                       <button
@@ -530,7 +530,7 @@ export default function ModernProfile() {
                         type={showPasswords.confirm ? 'text' : 'password'}
                         value={passwordForm.confirmPassword}
                         onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
-                        className="w-full px-4 py-2 pr-10 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="w-full px-4 py-2 pr-10 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#2563EB] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.15)] outline-none"
                         placeholder="Confirm new password"
                       />
                       <button
@@ -546,7 +546,7 @@ export default function ModernProfile() {
                   <button
                     type="submit"
                     disabled={isLoading}
-                    className="w-full px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition disabled:opacity-50 flex items-center justify-center gap-2"
+                    className="w-full px-6 py-3 bg-[#2563EB] text-white rounded-lg hover:bg-[#1D4ED8] transition disabled:opacity-50 flex items-center justify-center gap-2"
                   >
                     {isLoading ? (
                       <>

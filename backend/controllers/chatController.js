@@ -337,6 +337,15 @@ export const editMessage = async (req, res) => {
     if (message.isDeleted)
       throw new ApiError(400, 'Cannot edit a deleted message');
 
+    if (!message.editHistory) message.editHistory = [];
+    message.editHistory.push({
+      content: message.content,
+      editedAt: message.editedAt || message.updatedAt || message.createdAt || new Date(),
+    });
+    if (message.editHistory.length > 10) {
+      message.editHistory = message.editHistory.slice(-10);
+    }
+
     message.content = content.trim();
     message.isEdited = true;
     message.editedAt = new Date();

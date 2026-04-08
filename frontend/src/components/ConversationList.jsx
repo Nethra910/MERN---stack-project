@@ -121,7 +121,7 @@ export default function ConversationList() {
           <input
             type="text"
             placeholder="Search or start new chat..."
-            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-dark-border focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white dark:bg-dark-bg dark:text-dark-text"
+            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-dark-border focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.15)] text-sm bg-white dark:bg-dark-bg dark:text-dark-text"
           />
         </motion.div>
       </motion.div>
@@ -181,7 +181,7 @@ export default function ConversationList() {
                   onClick={() => handleSelectConversation(conversation)}
                   className={`p-3 cursor-pointer transition-all border-b border-gray-50 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-dark-hover group relative ${
                     String(chatId || currentConversation?._id) === String(conversation._id)
-                      ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500'
+                      ? 'bg-[#DBEAFE] dark:bg-blue-900/20 border-l-4 border-[#2563EB]'
                       : ''
                   } ${pinned ? 'bg-amber-50/50 dark:bg-amber-900/10' : ''}`}
                 >
@@ -231,7 +231,7 @@ export default function ConversationList() {
                           <motion.span
                             initial={{ scale: 0 }}
                             animate={{ scale: 1 }}
-                            className="ml-2 min-w-[20px] h-5 px-1.5 rounded-full bg-blue-500 text-white text-xs font-bold flex items-center justify-center"
+                            className="ml-2 min-w-[20px] h-5 px-1.5 rounded-full bg-[#2563EB] text-white text-xs font-bold flex items-center justify-center"
                           >
                             {unreadCount > 99 ? '99+' : unreadCount}
                           </motion.span>
@@ -240,6 +240,19 @@ export default function ConversationList() {
                       <p className={`text-sm truncate ${unreadCount > 0 ? 'text-gray-700 dark:text-dark-text font-medium' : 'text-gray-500 dark:text-dark-muted'}`}>
                         {conversation.lastMessage || 'No messages yet'}
                       </p>
+                      {unreadCount > 0 && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/messages/chat/${conversation._id}`, {
+                              state: { jumpToFirstUnread: true },
+                            });
+                          }}
+                          className="mt-1 text-xs text-[#2563EB] hover:text-[#1D4ED8] hover:underline"
+                        >
+                          Jump to first unread
+                        </button>
+                      )}
                       <p className="text-xs text-gray-400 dark:text-dark-muted mt-1">
                       {formatConversationDate(conversation.lastMessageTime)}
                       </p>
