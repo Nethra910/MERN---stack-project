@@ -23,7 +23,7 @@ export default function ModernChat() {
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
-              className="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors shadow-sm"
+              className="p-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg transition-colors shadow-sm"
             >
               <Plus className="w-5 h-5" />
             </motion.button>
@@ -35,7 +35,7 @@ export default function ModernChat() {
             <input
               type="text"
               placeholder="Search conversations..."
-              className="w-full pl-10 pr-4 py-2.5 bg-gray-50 dark:bg-dark-bg border border-gray-200 dark:border-dark-border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-dark-hover transition-all text-sm dark:text-dark-text dark:placeholder:text-dark-muted"
+              className="w-full pl-10 pr-4 py-2.5 bg-gray-50 dark:bg-dark-bg border border-gray-200 dark:border-dark-border rounded-xl focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.15)] focus:bg-white dark:focus:bg-dark-hover transition-all text-sm dark:text-dark-text dark:placeholder:text-dark-muted"
             />
           </div>
         </div>
@@ -53,7 +53,7 @@ export default function ModernChat() {
         ) : (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
-              <div className="w-24 h-24 bg-gray-100 dark:bg-dark-hover rounded-full flex items-center justify-center mx-auto mb-4">
+              <div className="w-24 h-24 bg-[#DBEAFE] dark:bg-dark-hover rounded-full flex items-center justify-center mx-auto mb-4">
                 <span className="text-5xl">💬</span>
               </div>
               <h3 className="text-xl font-bold text-gray-900 dark:text-dark-text mb-2">

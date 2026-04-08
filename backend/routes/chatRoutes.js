@@ -21,6 +21,16 @@ import {
   deleteConversation,
   addParticipant,
   removeParticipant,
+  updateGroupRules,
+  createInviteLink,
+  revokeInviteLink,
+  joinViaInvite,
+  listJoinRequests,
+  respondJoinRequest,
+  setGroupRole,
+  pinMessage,
+  unpinMessage,
+  getPinnedMessages,
 } from '../controllers/chatController.js';
 
 const router = express.Router();
@@ -62,5 +72,15 @@ router.get('/search/:query', searchUsers);
 // ─── Group management ──────────────────────────────────
 router.post('/conversations/:conversationId/participants', addParticipant);
 router.delete('/conversations/:conversationId/participants', removeParticipant);
+router.put('/conversations/:conversationId/rules', updateGroupRules);
+router.post('/conversations/:conversationId/invites', createInviteLink);
+router.delete('/conversations/:conversationId/invites/:code', revokeInviteLink);
+router.post('/conversations/invites/:code/join', joinViaInvite);
+router.get('/conversations/:conversationId/join-requests', listJoinRequests);
+router.post('/conversations/:conversationId/join-requests/:requestId', respondJoinRequest);
+router.post('/conversations/:conversationId/roles', setGroupRole);
+router.post('/conversations/:conversationId/pins/:messageId', pinMessage);
+router.delete('/conversations/:conversationId/pins/:messageId', unpinMessage);
+router.get('/conversations/:conversationId/pins', getPinnedMessages);
 
 export default router;

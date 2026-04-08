@@ -3,8 +3,8 @@ import API from './axios';
 export const chatApi = {
   // ─── Conversations ─────────────────────────────────
   getConversations: () => API.get('/chat/conversations'),
-  createConversation: (participantIds) =>
-    API.post('/chat/conversations', { participantIds }),
+  createConversation: (participantIds, options = {}) =>
+    API.post('/chat/conversations', { participantIds, ...options }),
   deleteConversation: (id) => API.delete(`/chat/conversations/${id}`),
 
   // ─── Messages ──────────────────────────────────────
@@ -61,4 +61,26 @@ export const chatApi = {
 
   // ─── User search ───────────────────────────────────
   searchUsers: (query) => API.get(`/chat/search/${query}`),
+
+  // ─── Group: rules/invites/roles/requests/pins ──────
+  updateGroupRules: (conversationId, text) =>
+    API.put(`/chat/conversations/${conversationId}/rules`, { text }),
+  createInviteLink: (conversationId, payload = {}) =>
+    API.post(`/chat/conversations/${conversationId}/invites`, payload),
+  revokeInviteLink: (conversationId, code) =>
+    API.delete(`/chat/conversations/${conversationId}/invites/${code}`),
+  joinViaInvite: (code) =>
+    API.post(`/chat/conversations/invites/${code}/join`),
+  listJoinRequests: (conversationId) =>
+    API.get(`/chat/conversations/${conversationId}/join-requests`),
+  respondJoinRequest: (conversationId, requestId, action) =>
+    API.post(`/chat/conversations/${conversationId}/join-requests/${requestId}`, { action }),
+  setGroupRole: (conversationId, targetUserId, role) =>
+    API.post(`/chat/conversations/${conversationId}/roles`, { targetUserId, role }),
+  pinMessage: (conversationId, messageId) =>
+    API.post(`/chat/conversations/${conversationId}/pins/${messageId}`),
+  unpinMessage: (conversationId, messageId) =>
+    API.delete(`/chat/conversations/${conversationId}/pins/${messageId}`),
+  getPinnedMessages: (conversationId) =>
+    API.get(`/chat/conversations/${conversationId}/pins`),
 };

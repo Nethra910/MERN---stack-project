@@ -27,6 +27,64 @@ const conversationSchema = new mongoose.Schema(
       ref: 'User',
       default: null,
     },
+    roles: {
+      type: Map,
+      of: {
+        type: String,
+        enum: ['admin', 'moderator', 'member'],
+        default: 'member',
+      },
+      default: {},
+    },
+    groupRules: {
+      text: {
+        type: String,
+        default: '',
+        maxlength: [2000, 'Rules exceed maximum length'],
+      },
+      updatedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null,
+      },
+      updatedAt: {
+        type: Date,
+        default: null,
+      },
+    },
+    inviteLinks: [
+      {
+        code: { type: String, required: true },
+        createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        createdAt: { type: Date, default: Date.now },
+        expiresAt: { type: Date, default: null },
+        maxUses: { type: Number, default: 0 },
+        uses: { type: Number, default: 0 },
+        revoked: { type: Boolean, default: false },
+      },
+    ],
+    joinRequests: [
+      {
+        userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        requestedAt: { type: Date, default: Date.now },
+        status: {
+          type: String,
+          enum: ['pending', 'approved', 'rejected'],
+          default: 'pending',
+        },
+      },
+    ],
+    pinnedMessages: [
+      {
+        messageId: { type: mongoose.Schema.Types.ObjectId, ref: 'Message' },
+        pinnedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        pinnedAt: { type: Date, default: Date.now },
+      },
+    ],
+    groupSettings: {
+      linkJoinEnabled: { type: Boolean, default: true },
+      joinApprovalRequired: { type: Boolean, default: true },
+    },
     lastMessage: {
       type: String,
       default: null,

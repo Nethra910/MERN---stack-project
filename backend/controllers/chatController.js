@@ -1,6 +1,7 @@
 import Conversation from '../models/Conversation.js';
 import Message from '../models/Message.js';
 import User from '../models/User.js';
+import crypto from 'crypto';
 import ApiError from '../utils/ApiError.js';
 import ApiResponse from '../utils/ApiResponse.js';
 import { sanitizeInput } from '../utils/validators.js';
@@ -9,6 +10,45 @@ import { uploadChatMedia, uploadVoiceMessage, deleteImage } from '../config/clou
 // ─── Helper ────────────────────────────────────────────
 const isParticipant = (participants, userId) =>
   participants.some((id) => id.equals(userId));
+
+const getRole = (conversation, userId) => {
+  if (!conversation?.roles) return 'member';
+  if (typeof conversation.roles.get === 'function') {
+    return conversation.roles.get(String(userId)) || 'member';
+  }
+  return conversation.roles[String(userId)] || 'member';
+};
+
+const requireRole = (conversation, userId, allowed) => {
+  const role = getRole(conversation, userId);
+  if (!allowed.includes(role)) {
+    throw new ApiError(403, 'Insufficient group role');
+  }
+  return role;
+};
+
+const normalizeName = (name) => String(name || '').toLowerCase().replace(/\s+/g, '');
+
+const parseMentions = (content, participants) => {
+  const text = String(content || '');
+  const mentionAll = /@all\b|@everyone\b/i.test(text);
+  const tokens = text.match(/@[a-zA-Z0-9_]+/g) || [];
+  if (tokens.length === 0 && !mentionAll) {
+    return { mentionAll: false, mentions: [] };
+  }
+
+  const mentionNames = tokens.map((t) => t.slice(1).toLowerCase());
+  const mentions = [];
+
+  participants.forEach((user) => {
+    const key = normalizeName(user.name);
+    if (mentionNames.includes(key)) {
+      mentions.push({ userId: user._id });
+    }
+  });
+
+  return { mentionAll, mentions };
+};
 
 // ─── Get all conversations for user ────────────────────
 export const getConversations = async (req, res) => {
@@ -32,7 +72,7 @@ export const getConversations = async (req, res) => {
 export const createConversation = async (req, res) => {
   try {
     const userId = req.user._id;
-    const { participantIds, isGroup, groupName, description } = req.body;
+    const { participantIds, isGroup, groupName, description, groupSettings } = req.body;
 
     if (!participantIds || participantIds.length === 0)
       throw new ApiError(400, 'Participant IDs are required');
@@ -47,12 +87,25 @@ export const createConversation = async (req, res) => {
       if (users.length !== allParticipants.length)
         throw new ApiError(400, 'Some participants do not exist');
 
+      const roles = new Map();
+      roles.set(String(userId), 'admin');
+      allParticipants.forEach((id) => {
+        if (String(id) !== String(userId)) roles.set(String(id), 'member');
+      });
+
+      const normalizedGroupSettings = {
+        joinApprovalRequired: Boolean(groupSettings?.joinApprovalRequired),
+        linkJoinEnabled: groupSettings?.linkJoinEnabled !== false,
+      };
+
       const conversation = await Conversation.create({
         participants: allParticipants,
         isGroup: true,
         groupName: groupName.trim(),
         groupAdmin: userId,
         description: description?.trim() || null,
+        roles,
+        groupSettings: normalizedGroupSettings,
       });
       await conversation.populate('participants', 'name email profilePicture'); // ✅ Added profilePicture
 
@@ -155,11 +208,22 @@ export const sendMessage = async (req, res) => {
         throw new ApiError(400, 'Invalid reply target');
     }
 
+    let mentionAll = false;
+    let mentions = [];
+    if (conversation.isGroup) {
+      const users = await User.find({ _id: { $in: conversation.participants } }).select('name');
+      const parsed = parseMentions(sanitizedContent, users);
+      mentionAll = parsed.mentionAll;
+      mentions = parsed.mentions;
+    }
+
     const message = await Message.create({
       conversationId,
       senderId: userId,
       content: sanitizedContent,
       replyTo: replyToId || null,
+      mentions,
+      mentionAll,
     });
 
     await message.populate('senderId', '-password');
@@ -230,12 +294,23 @@ export const sendMediaMessage = async (req, res) => {
     }
 
     // Create message with attachments
+    let mentionAll = false;
+    let mentions = [];
+    if (conversation.isGroup && content?.trim()) {
+      const users = await User.find({ _id: { $in: conversation.participants } }).select('name');
+      const parsed = parseMentions(content.trim(), users);
+      mentionAll = parsed.mentionAll;
+      mentions = parsed.mentions;
+    }
+
     const message = await Message.create({
       conversationId,
       senderId: userId,
       content: content?.trim() || '',
       attachments,
       replyTo: replyToId || null,
+      mentions,
+      mentionAll,
     });
 
     await message.populate('senderId', 'name email profilePicture');
@@ -775,6 +850,316 @@ export const removeParticipant = async (req, res) => {
     await conversation.populate('participants', 'name email profilePicture');
 
     return res.status(200).json(new ApiResponse(200, 'Participant removed', conversation));
+  } catch (err) {
+    if (err instanceof ApiError)
+      return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
+    return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
+  }
+};
+
+// ─── Group: Update rules ─────────────────────────────
+export const updateGroupRules = async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const { text } = req.body;
+    const userId = req.user._id;
+
+    const conversation = await Conversation.findById(conversationId);
+    if (!conversation) throw new ApiError(404, 'Conversation not found');
+    if (!conversation.isGroup) throw new ApiError(400, 'Not a group chat');
+    requireRole(conversation, userId, ['admin', 'moderator']);
+
+    conversation.groupRules = {
+      text: String(text || '').trim(),
+      updatedBy: userId,
+      updatedAt: new Date(),
+    };
+    await conversation.save();
+
+    return res.status(200).json(new ApiResponse(200, 'Group rules updated', conversation.groupRules));
+  } catch (err) {
+    if (err instanceof ApiError)
+      return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
+    return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
+  }
+};
+
+// ─── Group: Create invite link ───────────────────────
+export const createInviteLink = async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const { maxUses = 0, expiresAt = null } = req.body;
+    const userId = req.user._id;
+
+    const conversation = await Conversation.findById(conversationId);
+    if (!conversation) throw new ApiError(404, 'Conversation not found');
+    if (!conversation.isGroup) throw new ApiError(400, 'Not a group chat');
+    requireRole(conversation, userId, ['admin', 'moderator']);
+
+    if (!conversation.groupSettings?.linkJoinEnabled) {
+      throw new ApiError(400, 'Invite links are disabled for this group');
+    }
+
+    const code = crypto.randomBytes(6).toString('hex');
+    conversation.inviteLinks.push({
+      code,
+      createdBy: userId,
+      maxUses: Number(maxUses) || 0,
+      expiresAt: expiresAt ? new Date(expiresAt) : null,
+    });
+    await conversation.save();
+
+    return res.status(201).json(new ApiResponse(201, 'Invite link created', { code }));
+  } catch (err) {
+    if (err instanceof ApiError)
+      return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
+    return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
+  }
+};
+
+// ─── Group: Revoke invite link ───────────────────────
+export const revokeInviteLink = async (req, res) => {
+  try {
+    const { conversationId, code } = req.params;
+    const userId = req.user._id;
+
+    const conversation = await Conversation.findById(conversationId);
+    if (!conversation) throw new ApiError(404, 'Conversation not found');
+    if (!conversation.isGroup) throw new ApiError(400, 'Not a group chat');
+    requireRole(conversation, userId, ['admin', 'moderator']);
+
+    const invite = conversation.inviteLinks.find((i) => i.code === code);
+    if (!invite) throw new ApiError(404, 'Invite link not found');
+    invite.revoked = true;
+    await conversation.save();
+
+    return res.status(200).json(new ApiResponse(200, 'Invite link revoked'));
+  } catch (err) {
+    if (err instanceof ApiError)
+      return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
+    return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
+  }
+};
+
+// ─── Group: Join via invite link ─────────────────────
+export const joinViaInvite = async (req, res) => {
+  try {
+    const { code } = req.params;
+    const userId = req.user._id;
+
+    const conversation = await Conversation.findOne({
+      isGroup: true,
+      'inviteLinks.code': code,
+    });
+    if (!conversation) throw new ApiError(404, 'Invite not found');
+
+    const invite = conversation.inviteLinks.find((i) => i.code === code);
+    if (!invite || invite.revoked) throw new ApiError(400, 'Invite link is invalid');
+    if (invite.expiresAt && invite.expiresAt < new Date()) throw new ApiError(400, 'Invite link expired');
+    if (invite.maxUses > 0 && invite.uses >= invite.maxUses) throw new ApiError(400, 'Invite link reached max uses');
+
+    if (conversation.participants.some((id) => id.equals(userId))) {
+      return res.status(200).json(
+        new ApiResponse(200, 'Already a participant', {
+          status: 'member',
+          conversationId: conversation._id,
+        })
+      );
+    }
+
+    invite.uses += 1;
+
+    if (conversation.groupSettings?.joinApprovalRequired) {
+      const existing = conversation.joinRequests.find((r) => r.userId?.equals(userId) && r.status === 'pending');
+      if (!existing) {
+        conversation.joinRequests.push({ userId });
+      }
+      await conversation.save();
+      return res.status(200).json(
+        new ApiResponse(200, 'Join request created', {
+          status: 'pending',
+          conversationId: conversation._id,
+        })
+      );
+    }
+
+    conversation.participants.push(userId);
+    if (conversation.roles?.set) conversation.roles.set(String(userId), 'member');
+    await conversation.save();
+
+    return res.status(200).json(
+      new ApiResponse(200, 'Joined group', {
+        status: 'member',
+        conversationId: conversation._id,
+      })
+    );
+  } catch (err) {
+    if (err instanceof ApiError)
+      return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
+    return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
+  }
+};
+
+// ─── Group: List join requests ───────────────────────
+export const listJoinRequests = async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const userId = req.user._id;
+    const conversation = await Conversation.findById(conversationId).populate('joinRequests.userId', 'name email profilePicture');
+    if (!conversation) throw new ApiError(404, 'Conversation not found');
+    if (!conversation.isGroup) throw new ApiError(400, 'Not a group chat');
+    requireRole(conversation, userId, ['admin', 'moderator']);
+
+    const pending = (conversation.joinRequests || []).filter((r) => r.status === 'pending');
+    return res.status(200).json(new ApiResponse(200, 'Join requests fetched', pending));
+  } catch (err) {
+    if (err instanceof ApiError)
+      return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
+    return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
+  }
+};
+
+// ─── Group: Respond to join request ─────────────────-
+export const respondJoinRequest = async (req, res) => {
+  try {
+    const { conversationId, requestId } = req.params;
+    const { action } = req.body; // approve | reject
+    const userId = req.user._id;
+
+    const conversation = await Conversation.findById(conversationId);
+    if (!conversation) throw new ApiError(404, 'Conversation not found');
+    if (!conversation.isGroup) throw new ApiError(400, 'Not a group chat');
+    requireRole(conversation, userId, ['admin', 'moderator']);
+
+    const request = conversation.joinRequests.id(requestId);
+    if (!request) throw new ApiError(404, 'Join request not found');
+    if (request.status !== 'pending') throw new ApiError(400, 'Request already processed');
+
+    if (action === 'approve') {
+      request.status = 'approved';
+      if (!conversation.participants.some((id) => id.equals(request.userId))) {
+        conversation.participants.push(request.userId);
+      }
+      if (conversation.roles?.set) conversation.roles.set(String(request.userId), 'member');
+    } else if (action === 'reject') {
+      request.status = 'rejected';
+    } else {
+      throw new ApiError(400, 'Action must be approve or reject');
+    }
+
+    await conversation.save();
+    return res.status(200).json(new ApiResponse(200, 'Join request updated', { status: request.status }));
+  } catch (err) {
+    if (err instanceof ApiError)
+      return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
+    return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
+  }
+};
+
+// ─── Group: Set role ─────────────────────────────────
+export const setGroupRole = async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const { targetUserId, role } = req.body;
+    const userId = req.user._id;
+
+    if (!['admin', 'moderator', 'member'].includes(role)) {
+      throw new ApiError(400, 'Invalid role');
+    }
+
+    const conversation = await Conversation.findById(conversationId);
+    if (!conversation) throw new ApiError(404, 'Conversation not found');
+    if (!conversation.isGroup) throw new ApiError(400, 'Not a group chat');
+    requireRole(conversation, userId, ['admin']);
+
+    if (!conversation.participants.some((id) => id.equals(targetUserId))) {
+      throw new ApiError(400, 'User is not a participant');
+    }
+
+    if (conversation.roles?.set) {
+      conversation.roles.set(String(targetUserId), role);
+    }
+
+    await conversation.save();
+    return res.status(200).json(new ApiResponse(200, 'Role updated', { userId: targetUserId, role }));
+  } catch (err) {
+    if (err instanceof ApiError)
+      return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
+    return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
+  }
+};
+
+// ─── Group: Pin message ─────────────────────────────-
+export const pinMessage = async (req, res) => {
+  try {
+    const { conversationId, messageId } = req.params;
+    const userId = req.user._id;
+
+    const conversation = await Conversation.findById(conversationId);
+    if (!conversation) throw new ApiError(404, 'Conversation not found');
+    if (!conversation.isGroup) throw new ApiError(400, 'Not a group chat');
+    requireRole(conversation, userId, ['admin', 'moderator']);
+
+    if (!conversation.pinnedMessages.some((p) => String(p.messageId) === String(messageId))) {
+      conversation.pinnedMessages.push({ messageId, pinnedBy: userId, pinnedAt: new Date() });
+      await conversation.save();
+    }
+
+    return res.status(200).json(new ApiResponse(200, 'Message pinned'));
+  } catch (err) {
+    if (err instanceof ApiError)
+      return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
+    return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
+  }
+};
+
+// ─── Group: Unpin message ─────────────────────────---
+export const unpinMessage = async (req, res) => {
+  try {
+    const { conversationId, messageId } = req.params;
+    const userId = req.user._id;
+
+    const conversation = await Conversation.findById(conversationId);
+    if (!conversation) throw new ApiError(404, 'Conversation not found');
+    if (!conversation.isGroup) throw new ApiError(400, 'Not a group chat');
+    requireRole(conversation, userId, ['admin', 'moderator']);
+
+    conversation.pinnedMessages = conversation.pinnedMessages.filter(
+      (p) => String(p.messageId) !== String(messageId)
+    );
+    await conversation.save();
+
+    return res.status(200).json(new ApiResponse(200, 'Message unpinned'));
+  } catch (err) {
+    if (err instanceof ApiError)
+      return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
+    return res.status(500).json(new ApiResponse(500, 'Server error: ' + err.message));
+  }
+};
+
+// ─── Group: Get pinned messages ─────────────────-----
+export const getPinnedMessages = async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const userId = req.user._id;
+
+    const conversation = await Conversation.findById(conversationId);
+    if (!conversation) throw new ApiError(404, 'Conversation not found');
+    if (!conversation.isGroup) throw new ApiError(400, 'Not a group chat');
+    if (!isParticipant(conversation.participants, userId)) throw new ApiError(403, 'Not a participant');
+
+    const ids = conversation.pinnedMessages.map((p) => p.messageId);
+    const messages = await Message.find({ _id: { $in: ids } })
+      .populate('senderId', 'name email profilePicture')
+      .lean();
+
+    const byId = new Map(messages.map((m) => [String(m._id), m]));
+    const ordered = conversation.pinnedMessages
+      .sort((a, b) => new Date(b.pinnedAt) - new Date(a.pinnedAt))
+      .map((p) => byId.get(String(p.messageId)))
+      .filter(Boolean);
+
+    return res.status(200).json(new ApiResponse(200, 'Pinned messages', ordered));
   } catch (err) {
     if (err instanceof ApiError)
       return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));

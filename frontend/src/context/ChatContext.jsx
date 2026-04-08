@@ -9,6 +9,8 @@ export const ChatProvider = ({ children }) => {
   const [conversations, setConversations]         = useState([]);
   const [currentConversation, setCurrentConversation] = useState(null);
   const [messages, setMessages]                   = useState([]);
+  const [messagesLoadedFor, setMessagesLoadedFor] = useState(null);
+  const [messagesLoadedCount, setMessagesLoadedCount] = useState(null);
   const [socket, setSocket]                       = useState(null);
   const [onlineUsers, setOnlineUsers]             = useState(new Set());
   const [typingUsers, setTypingUsers]             = useState(new Set());
@@ -33,6 +35,16 @@ export const ChatProvider = ({ children }) => {
   // ─── Unread counts & pins ────────────────────────
   const [unreadCounts, setUnreadCounts]           = useState({});
   const [totalUnread, setTotalUnread]             = useState(0);
+
+  // ─── Invite banner ───────────────────────────────
+  const [inviteBanner, setInviteBanner]           = useState(null);
+
+  // ─── Group feature state ─────────────────────────
+  const [pinnedMessages, setPinnedMessages]       = useState([]);
+  const [pinnedLoading, setPinnedLoading]         = useState(false);
+  const [joinRequests, setJoinRequests]           = useState([]);
+  const [joinRequestsLoading, setJoinRequestsLoading] = useState(false);
+  const [latestInviteCode, setLatestInviteCode]   = useState('');
 
   // ─── Notification preference (persisted) ────────────
   const [notificationsEnabled, setNotificationsEnabled] = useState(() => {
@@ -234,12 +246,137 @@ export const ChatProvider = ({ children }) => {
     }
   }, [fetchConversations]);
 
+  // ─── Group: rules ─────────────────────────────────
+  const updateGroupRules = useCallback(async (conversationId, text) => {
+    try {
+      const response = await chatApi.updateGroupRules(conversationId, text);
+      const rules = response?.data?.data;
+      setCurrentConversation((prev) =>
+        prev && String(prev._id) === String(conversationId)
+          ? { ...prev, groupRules: rules }
+          : prev
+      );
+      fetchConversations();
+      return rules;
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to update group rules');
+      throw err;
+    }
+  }, [fetchConversations]);
+
+  // ─── Group: invites ───────────────────────────────
+  const createInviteLink = useCallback(async (conversationId, payload = {}) => {
+    try {
+      const response = await chatApi.createInviteLink(conversationId, payload);
+      const code = response?.data?.data?.code || '';
+      setLatestInviteCode(code);
+      return code;
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to create invite link');
+      throw err;
+    }
+  }, []);
+
+  const revokeInviteLink = useCallback(async (conversationId, code) => {
+    try {
+      await chatApi.revokeInviteLink(conversationId, code);
+      if (latestInviteCode === code) setLatestInviteCode('');
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to revoke invite link');
+      throw err;
+    }
+  }, [latestInviteCode]);
+
+  const joinViaInvite = useCallback(async (code) => {
+    try {
+      const response = await chatApi.joinViaInvite(code);
+      fetchConversations();
+      return response?.data?.data;
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to join via invite');
+      throw err;
+    }
+  }, [fetchConversations]);
+
+  // ─── Group: join requests ─────────────────────────
+  const fetchJoinRequests = useCallback(async (conversationId) => {
+    try {
+      setJoinRequestsLoading(true);
+      const response = await chatApi.listJoinRequests(conversationId);
+      setJoinRequests(response?.data?.data || []);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to load join requests');
+    } finally {
+      setJoinRequestsLoading(false);
+    }
+  }, []);
+
+  const respondToJoinRequest = useCallback(async (conversationId, requestId, action) => {
+    try {
+      await chatApi.respondJoinRequest(conversationId, requestId, action);
+      fetchJoinRequests(conversationId);
+      fetchConversations();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to respond to join request');
+      throw err;
+    }
+  }, [fetchJoinRequests, fetchConversations]);
+
+  // ─── Group: roles ─────────────────────────────────
+  const setGroupRole = useCallback(async (conversationId, targetUserId, role) => {
+    try {
+      await chatApi.setGroupRole(conversationId, targetUserId, role);
+      fetchConversations();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to update role');
+      throw err;
+    }
+  }, [fetchConversations]);
+
+  // ─── Group: pins ─────────────────────────────────-
+  const fetchPinnedMessages = useCallback(async (conversationId) => {
+    try {
+      setPinnedLoading(true);
+      const response = await chatApi.getPinnedMessages(conversationId);
+      setPinnedMessages(response?.data?.data || []);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to load pinned messages');
+    } finally {
+      setPinnedLoading(false);
+    }
+  }, []);
+
+  const pinMessage = useCallback(async (conversationId, messageId) => {
+    try {
+      await chatApi.pinMessage(conversationId, messageId);
+      fetchPinnedMessages(conversationId);
+      fetchConversations();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to pin message');
+      throw err;
+    }
+  }, [fetchPinnedMessages, fetchConversations]);
+
+  const unpinMessage = useCallback(async (conversationId, messageId) => {
+    try {
+      await chatApi.unpinMessage(conversationId, messageId);
+      fetchPinnedMessages(conversationId);
+      fetchConversations();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to unpin message');
+      throw err;
+    }
+  }, [fetchPinnedMessages, fetchConversations]);
+
   // ─── Fetch messages ────────────────────────────────
   const fetchMessages = useCallback(async (conversationId) => {
     try {
       const response = await API.get(`/chat/conversations/${conversationId}/messages?limit=${MESSAGE_LIMIT}`);
       const data = response?.data?.data;
-      setMessages(data?.messages || []);
+      const nextMessages = data?.messages || [];
+      setMessages(nextMessages);
+      setMessagesLoadedFor(String(conversationId));
+      setMessagesLoadedCount(nextMessages.length);
       setMessageSkip(MESSAGE_LIMIT);
       setHasMoreMessages((data?.messages?.length || 0) >= MESSAGE_LIMIT);
     } catch (err) {
@@ -280,9 +417,9 @@ export const ChatProvider = ({ children }) => {
   }, [isLoadingMore, hasMoreMessages, messageSkip]);
 
   // ─── Create conversation ───────────────────────────
-  const createConversation = useCallback(async (participantIds) => {
+  const createConversation = useCallback(async (participantIds, options = {}) => {
     try {
-      const response = await API.post('/chat/conversations', { participantIds });
+      const response = await chatApi.createConversation(participantIds, options);
       setConversations((prev) => [response.data.data, ...prev]);
       setCurrentConversation(response.data.data);
       setMessages([]);
@@ -509,6 +646,28 @@ export const ChatProvider = ({ children }) => {
     unreadCounts, totalUnread, fetchUnreadCounts, markConversationAsRead,
     pinConversation, unpinConversation,
 
+    // Group features
+    updateGroupRules,
+    createInviteLink,
+    revokeInviteLink,
+    joinViaInvite,
+    fetchJoinRequests,
+    respondToJoinRequest,
+    setGroupRole,
+    pinnedMessages,
+    pinnedLoading,
+    fetchPinnedMessages,
+    pinMessage,
+    unpinMessage,
+    joinRequests,
+    joinRequestsLoading,
+    latestInviteCode,
+    setLatestInviteCode,
+
+    // Invite banner
+    inviteBanner,
+    setInviteBanner,
+
     // New feature state
     replyingTo, setReplyingTo,
     editingMessage, setEditingMessage,
@@ -528,6 +687,10 @@ export const ChatProvider = ({ children }) => {
     // Notification preference
     notificationsEnabled,
     toggleNotifications,
+
+    // Message load tracking
+    messagesLoadedFor,
+    messagesLoadedCount,
   };
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

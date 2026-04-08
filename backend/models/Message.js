@@ -41,6 +41,18 @@ const messageSchema = new mongoose.Schema(
       ref: 'Message',
       default: null,
     },
+    mentions: [
+      {
+        userId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+        },
+      },
+    ],
+    mentionAll: {
+      type: Boolean,
+      default: false,
+    },
 
     // ─── Reactions { emoji: [userId, ...] } ───────────
     reactions: {

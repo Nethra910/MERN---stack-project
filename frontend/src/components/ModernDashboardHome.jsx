@@ -20,9 +20,9 @@ export default function ModernDashboardHome() {
       value: conversations.length.toString(), 
       icon: MessageSquare, 
       color: 'blue',
-      bgColor: 'bg-blue-50',
-      textColor: 'text-blue-600',
-      iconColor: 'text-blue-500'
+      bgColor: 'bg-[#DBEAFE]',
+      textColor: 'text-[#2563EB]',
+      iconColor: 'text-[#2563EB]'
     },
     { 
       label: 'Active Users', 
@@ -55,7 +55,7 @@ export default function ModernDashboardHome() {
 
   const recentActivities = [
     { icon: CheckCircle, text: 'Account created successfully', time: '2 days ago', color: 'text-green-500' },
-    { icon: MessageSquare, text: 'First conversation started', time: '1 day ago', color: 'text-blue-500' },
+    { icon: MessageSquare, text: 'First conversation started', time: '1 day ago', color: 'text-[#2563EB]' },
     { icon: Users, text: 'Connected with new contacts', time: 'Today', color: 'text-purple-500' },
   ];
 
@@ -66,7 +66,7 @@ export default function ModernDashboardHome() {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-2xl p-8 text-white shadow-lg"
+          className="bg-gradient-to-r from-[#2563EB] to-purple-600 rounded-2xl p-8 text-white shadow-lg"
         >
           <div className="flex items-center justify-between">
             <div>
@@ -118,7 +118,7 @@ export default function ModernDashboardHome() {
           >
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-lg font-bold text-gray-900">Recent Activity</h3>
-              <button className="text-sm text-blue-600 hover:text-blue-700 font-medium">
+              <button className="text-sm text-[#2563EB] hover:text-[#1D4ED8] font-medium">
                 View All
               </button>
             </div>
@@ -165,8 +165,8 @@ export default function ModernDashboardHome() {
           >
             <h3 className="text-lg font-bold text-gray-900 mb-4">Quick Actions</h3>
             <div className="space-y-3">
-              <button className="w-full flex items-center gap-3 p-4 bg-gradient-to-r from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 rounded-lg transition-all text-left group">
-                <MessageSquare className="w-5 h-5 text-blue-600" />
+              <button className="w-full flex items-center gap-3 p-4 bg-gradient-to-r from-[#DBEAFE] to-[#BFDBFE] hover:from-[#BFDBFE] hover:to-[#93C5FD] rounded-lg transition-all text-left group">
+                <MessageSquare className="w-5 h-5 text-[#2563EB]" />
                 <div>
                   <p className="font-medium text-sm text-gray-900">New Message</p>
                   <p className="text-xs text-gray-500">Start a conversation</p>

@@ -65,7 +65,7 @@ export default function ModernProfile() {
           className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden"
         >
           {/* Cover Image */}
-          <div className="h-32 bg-gradient-to-r from-blue-500 to-purple-600 relative">
+          <div className="h-32 bg-gradient-to-r from-[#2563EB] to-purple-600 relative">
             <div className="absolute inset-0 bg-black/10"></div>
           </div>
 
@@ -75,7 +75,7 @@ export default function ModernProfile() {
               {/* Avatar */}
               <div className="flex items-end gap-6 mb-4 md:mb-0">
                 <div className="relative group">
-                  <div className="w-32 h-32 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-4xl font-bold shadow-xl border-4 border-white">
+                  <div className="w-32 h-32 rounded-2xl bg-gradient-to-br from-[#2563EB] to-purple-600 flex items-center justify-center text-white text-4xl font-bold shadow-xl border-4 border-white">
                     {user.name?.[0]?.toUpperCase() || 'U'}
                   </div>
                   <button className="absolute bottom-2 right-2 p-2 bg-white rounded-lg shadow-lg hover:bg-gray-50 transition-colors opacity-0 group-hover:opacity-100">
@@ -91,7 +91,7 @@ export default function ModernProfile() {
                     <span className="px-3 py-1 bg-green-50 text-green-700 rounded-full text-xs font-medium">
                       Active
                     </span>
-                    <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-medium">
+                    <span className="px-3 py-1 bg-[#DBEAFE] text-[#2563EB] rounded-full text-xs font-medium">
                       Verified
                     </span>
                   </div>
@@ -104,7 +104,7 @@ export default function ModernProfile() {
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   onClick={() => setIsEditing(true)}
-                  className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors shadow-sm"
+                  className="flex items-center gap-2 px-6 py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg font-medium transition-colors shadow-sm"
                 >
                   <Edit2 className="w-4 h-4" />
                   <span>Edit Profile</span>
@@ -146,7 +146,7 @@ export default function ModernProfile() {
                   onClick={() => setActiveTab(tab.id)}
                   className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium text-sm transition-all ${
                     activeTab === tab.id
-                      ? 'bg-blue-50 text-blue-600'
+                      ? 'bg-[#DBEAFE] text-[#2563EB]'
                       : 'text-gray-600 hover:bg-gray-50'
                   }`}
                 >
@@ -179,7 +179,7 @@ export default function ModernProfile() {
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   disabled={!isEditing}
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-600 transition-all"
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#2563EB] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.15)] focus:border-transparent disabled:bg-gray-50 disabled:text-gray-600 transition-all"
                   placeholder="Enter your name"
                 />
               </div>
@@ -195,7 +195,7 @@ export default function ModernProfile() {
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   disabled={!isEditing}
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-600 transition-all"
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#2563EB] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.15)] focus:border-transparent disabled:bg-gray-50 disabled:text-gray-600 transition-all"
                   placeholder="Enter your email"
                 />
               </div>
@@ -211,7 +211,7 @@ export default function ModernProfile() {
                   value={formData.phone}
                   onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                   disabled={!isEditing}
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-600 transition-all"
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#2563EB] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.15)] focus:border-transparent disabled:bg-gray-50 disabled:text-gray-600 transition-all"
                   placeholder="+1 (555) 123-4567"
                 />
               </div>
@@ -227,7 +227,7 @@ export default function ModernProfile() {
                   value={formData.location}
                   onChange={(e) => setFormData({ ...formData, location: e.target.value })}
                   disabled={!isEditing}
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-600 transition-all"
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#2563EB] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.15)] focus:border-transparent disabled:bg-gray-50 disabled:text-gray-600 transition-all"
                   placeholder="City, Country"
                 />
               </div>
@@ -244,7 +244,7 @@ export default function ModernProfile() {
                 onChange={(e) => setFormData({ ...formData, bio: e.target.value })}
                 disabled={!isEditing}
                 rows="4"
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-600 transition-all resize-none"
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#2563EB] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.15)] focus:border-transparent disabled:bg-gray-50 disabled:text-gray-600 transition-all resize-none"
                 placeholder="Tell us about yourself..."
               />
             </div>
@@ -291,7 +291,7 @@ export default function ModernProfile() {
                 </label>
                 <input
                   type={showPassword ? "text" : "password"}
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-12"
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#2563EB] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.15)] focus:border-transparent pr-12"
                   placeholder="Enter current password"
                 />
                 <button 
@@ -309,7 +309,7 @@ export default function ModernProfile() {
                 </label>
                 <input
                   type="password"
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#2563EB] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.15)] focus:border-transparent"
                   placeholder="Enter new password"
                 />
               </div>
@@ -321,12 +321,12 @@ export default function ModernProfile() {
                 </label>
                 <input
                   type="password"
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#2563EB] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.15)] focus:border-transparent"
                   placeholder="Confirm new password"
                 />
               </div>
 
-              <button className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors">
+              <button className="px-6 py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg font-medium transition-colors">
                 Update Password
               </button>
             </div>
@@ -374,7 +374,7 @@ export default function ModernProfile() {
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input type="checkbox" defaultChecked={item.checked} className="sr-only peer" />
-                    <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-[#DBEAFE] rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#2563EB]"></div>
                   </label>
                 </div>
               ))}

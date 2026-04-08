@@ -3,7 +3,199 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Pin } from 'lucide-react';
 import { useChat } from '../context/ChatContext';
+import API from '../api/axios';
 import UserSearch from './UserSearch';
+
+function GroupCreateModal({ onClose, onCreate, currentUserId }) {
+  const [groupName, setGroupName] = useState('');
+  const [description, setDescription] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [results, setResults] = useState([]);
+  const [selected, setSelected] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [joinApprovalRequired, setJoinApprovalRequired] = useState(true);
+  const [linkJoinEnabled, setLinkJoinEnabled] = useState(true);
+
+  const handleSearch = async (query) => {
+    setSearchQuery(query);
+    if (query.trim().length < 2) {
+      setResults([]);
+      return;
+    }
+    try {
+      setLoading(true);
+      const response = await API.get(`/chat/search/${query}`);
+      const data = response?.data?.data || [];
+      setResults(data.filter((user) => String(user?._id) !== String(currentUserId)));
+    } catch {
+      setResults([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleSelect = (user) => {
+    setSelected((prev) => {
+      const exists = prev.some((u) => String(u._id) === String(user._id));
+      if (exists) return prev.filter((u) => String(u._id) !== String(user._id));
+      return [...prev, user];
+    });
+  };
+
+  const handleCreate = async () => {
+    setError('');
+    if (!groupName.trim()) {
+      setError('Group name is required.');
+      return;
+    }
+    if (selected.length < 2) {
+      setError('Select at least 2 participants.');
+      return;
+    }
+
+    await onCreate(
+      selected.map((u) => u._id),
+      {
+        isGroup: true,
+        groupName: groupName.trim(),
+        description: description.trim(),
+        groupSettings: {
+          joinApprovalRequired,
+          linkJoinEnabled,
+        },
+      }
+    );
+    onClose();
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.94, y: 16 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.94, y: 16 }}
+        onClick={(e) => e.stopPropagation()}
+        className="bg-white dark:bg-dark-card rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden"
+      >
+        <div className="p-4 border-b border-gray-100 dark:border-dark-border flex items-center justify-between">
+          <h3 className="font-bold text-gray-800 dark:text-dark-text text-lg">Create group</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">✕</button>
+        </div>
+
+        <div className="p-4 space-y-4">
+          <div>
+            <label className="text-xs text-gray-500">Group name</label>
+            <input
+              value={groupName}
+              onChange={(e) => setGroupName(e.target.value)}
+              className="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg text-sm focus:ring-2 focus:ring-[#2563EB] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.15)] outline-none"
+              placeholder="Design team"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500">Description (optional)</label>
+            <input
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg text-sm focus:ring-2 focus:ring-[#2563EB] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.15)] outline-none"
+              placeholder="Project updates and planning"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-gray-500">Add participants</label>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {selected.map((user) => (
+                <span key={user._id} className="px-2 py-1 rounded-full bg-[#DBEAFE] text-[#2563EB] text-xs">
+                  {user.name}
+                </span>
+              ))}
+              {selected.length === 0 && (
+                <span className="text-xs text-gray-400">No participants selected yet.</span>
+              )}
+            </div>
+            <input
+              value={searchQuery}
+              onChange={(e) => handleSearch(e.target.value)}
+              className="mt-2 w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-bg text-sm focus:ring-2 focus:ring-[#2563EB] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.15)] outline-none"
+              placeholder="Search users..."
+            />
+            {loading && <p className="text-xs text-gray-400 mt-1">Searching...</p>}
+            {results.length > 0 && (
+              <div className="mt-2 max-h-48 overflow-y-auto space-y-1">
+                {results.map((user) => {
+                  const isSelected = selected.some((u) => String(u._id) === String(user._id));
+                  return (
+                    <button
+                      key={user._id}
+                      onClick={() => toggleSelect(user)}
+                      className={`w-full text-left px-3 py-2 rounded-lg border transition text-sm flex items-center gap-2 ${
+                        isSelected
+                          ? 'border-[#2563EB] bg-[#DBEAFE] text-[#2563EB]'
+                          : 'border-gray-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      <span className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-indigo-500 text-white text-xs font-bold flex items-center justify-center">
+                        {(user.name?.[0] || '?').toUpperCase()}
+                      </span>
+                      <span className="flex-1 truncate">{user.name}</span>
+                      <span className="text-[10px] text-gray-400 truncate">{user.email}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex items-center gap-2 text-xs text-gray-600">
+              <input
+                type="checkbox"
+                checked={joinApprovalRequired}
+                onChange={(e) => setJoinApprovalRequired(e.target.checked)}
+                className="accent-[#2563EB]"
+              />
+              Require approval to join
+            </label>
+            <label className="flex items-center gap-2 text-xs text-gray-600">
+              <input
+                type="checkbox"
+                checked={linkJoinEnabled}
+                onChange={(e) => setLinkJoinEnabled(e.target.checked)}
+                className="accent-[#2563EB]"
+              />
+              Enable invite links
+            </label>
+          </div>
+
+          {error && <p className="text-xs text-red-500">{error}</p>}
+        </div>
+
+        <div className="p-4 border-t border-gray-100 dark:border-dark-border flex gap-2">
+          <button
+            onClick={onClose}
+            className="flex-1 py-2 rounded-xl border border-gray-200 text-gray-600 text-sm hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleCreate}
+            className="flex-1 py-2 rounded-xl bg-[#2563EB] text-white text-sm hover:bg-[#1D4ED8]"
+          >
+            Create group
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
 
 export default function ConversationList() {
   const navigate = useNavigate();
@@ -11,9 +203,10 @@ export default function ConversationList() {
   const { 
     conversations, currentConversation, setCurrentConversation, fetchMessages, 
     onlineUsers, loading, unreadCounts, fetchUnreadCounts, markConversationAsRead,
-    pinConversation, unpinConversation
+    pinConversation, unpinConversation, createConversation
   } = useChat();
   const [searchOpen, setSearchOpen] = useState(false);
+  const [groupModalOpen, setGroupModalOpen] = useState(false);
 
   const user = useMemo(() => {
     try {
@@ -102,14 +295,26 @@ export default function ConversationList() {
       >
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-bold text-gray-800 dark:text-dark-text">💬 Messages</h1>
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={() => setSearchOpen(!searchOpen)}
-            className="p-2 hover:bg-white dark:hover:bg-dark-hover rounded-lg transition"
-          >
-            ✏️
-          </motion.button>
+          <div className="flex items-center gap-2">
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setGroupModalOpen(true)}
+              className="p-2 bg-[#2563EB] text-white rounded-lg transition hover:bg-[#1D4ED8]"
+              title="Create group"
+            >
+              👥
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setSearchOpen(!searchOpen)}
+              className="p-2 hover:bg-white dark:hover:bg-dark-hover rounded-lg transition"
+              title="Start new chat"
+            >
+              ✏️
+            </motion.button>
+          </div>
         </div>
 
         <motion.div
@@ -159,9 +364,9 @@ export default function ConversationList() {
               animate={{ opacity: 1 }}
               className="flex flex-col items-center justify-center h-full text-gray-400 dark:text-dark-muted p-4"
             >
-              <div className="text-5xl mb-3">📭</div>
+              <div className="w-20 h-20 rounded-full bg-[#DBEAFE] flex items-center justify-center text-4xl mb-3">📭</div>
               <p className="font-medium">No conversations yet</p>
-              <p className="text-sm">Click ✏️ to start a new chat</p>
+              <p className="text-sm text-[#2563EB]">Click ✏️ to start a new chat</p>
             </motion.div>
           ) : (
             sortedConversations.map((conversation, idx) => {
@@ -264,6 +469,16 @@ export default function ConversationList() {
           )}
         </AnimatePresence>
       </div>
+
+      <AnimatePresence>
+        {groupModalOpen && (
+          <GroupCreateModal
+            onClose={() => setGroupModalOpen(false)}
+            onCreate={createConversation}
+            currentUserId={currentUserId}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -31,8 +31,48 @@ const parseReactions = (reactions) => {
   return reactions; // already plain object
 };
 
+const renderMessageContent = (content) => {
+  const clean = sanitizeContent(content);
+  const parts = clean.split(/(@all\b|@everyone\b|@[a-zA-Z0-9_]+)/gi);
+  return parts
+    .filter((part) => part !== '')
+    .map((part, idx) => {
+      if (part.startsWith('@')) {
+        return (
+          <span key={`${part}-${idx}`} className="text-[#2563EB] font-semibold">
+            {part}
+          </span>
+        );
+      }
+      return <span key={`text-${idx}`}>{part}</span>;
+    });
+};
+
+const isMentionedByMessage = (msg, currentUserId) => {
+  if (!msg || !currentUserId) return false;
+  if (msg.mentionAll) return true;
+  if (!Array.isArray(msg.mentions)) return false;
+  return msg.mentions.some((m) => String(m.userId || m) === String(currentUserId));
+};
+
 // ─── Single Message Bubble ────────────────────────────
-function MessageBubble({ msg, isMine, currentUserId, readStatus, onReply, onEdit, onDelete, onForward, onReact, onViewHistory }) {
+function MessageBubble({
+  msg,
+  isMine,
+  currentUserId,
+  readStatus,
+  isGroup,
+  isPinned,
+  canModerate,
+  onReply,
+  onEdit,
+  onDelete,
+  onForward,
+  onReact,
+  onViewHistory,
+  onPin,
+  onUnpin,
+}) {
   const [menuOpen, setMenuOpen]         = useState(false);
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const menuRef = useRef(null);
@@ -51,6 +91,7 @@ function MessageBubble({ msg, isMine, currentUserId, readStatus, onReply, onEdit
 
   const reactions = parseReactions(msg.reactions);
   const isDeleted = msg.isDeleted && msg.deleteType === 'everyone';
+  const mentionedMe = !isMine && isMentionedByMessage(msg, currentUserId);
 
   const formatTime = (msg) => {
     const d = new Date(msg.createdAt || msg.timestamp);
@@ -136,6 +177,13 @@ function MessageBubble({ msg, isMine, currentUserId, readStatus, onReply, onEdit
                   )}
                   {!msg.isDeleted && (
                     <>
+                      {isGroup && canModerate && (
+                        isPinned ? (
+                          <MenuItem icon="📌" label="Unpin" onClick={() => { onUnpin(msg._id); setMenuOpen(false); }} />
+                        ) : (
+                          <MenuItem icon="📌" label="Pin" onClick={() => { onPin(msg._id); setMenuOpen(false); }} />
+                        )
+                      )}
                       {isMine && (
                         <MenuItem icon="🗑️" label="Delete for everyone" danger onClick={() => { onDelete(msg._id, 'everyone'); setMenuOpen(false); }} />
                       )}
@@ -174,11 +222,16 @@ function MessageBubble({ msg, isMine, currentUserId, readStatus, onReply, onEdit
               className={`px-4 py-2.5 rounded-2xl shadow-sm relative ${
                 isDeleted
                   ? 'bg-gray-100 dark:bg-dark-hover text-gray-400 dark:text-dark-muted italic border border-gray-200 dark:border-dark-border'
-                  : isMine
-                  ? 'bg-blue-500 text-white rounded-br-sm'
-                  : 'bg-gray-100 dark:bg-dark-hover text-gray-800 dark:text-dark-text rounded-bl-sm'
+                    : isMine
+                    ? 'bg-[#2563EB] text-white rounded-br-sm'
+                  : `bg-gray-100 dark:bg-dark-hover text-gray-800 dark:text-dark-text rounded-bl-sm${mentionedMe ? ' ring-2 ring-[#DBEAFE] border border-[#2563EB]/40' : ''}`
               }`}
             >
+              {mentionedMe && !isDeleted && (
+                <span className="inline-block text-[10px] uppercase tracking-wide text-[#2563EB] bg-[#DBEAFE] px-2 py-0.5 rounded-full mb-1">
+                  Mentioned you
+                </span>
+              )}
               {/* Forwarded label */}
               {msg.forwardedFrom?.messageId && !isDeleted && (
                 <p className={`text-xs mb-1 ${isMine ? 'text-blue-200' : 'text-gray-400'}`}>
@@ -229,7 +282,7 @@ function MessageBubble({ msg, isMine, currentUserId, readStatus, onReply, onEdit
 
               {/* Text content */}
               {msg.content && (
-                <p className="text-sm break-words leading-relaxed">{sanitizeContent(msg.content)}</p>
+                <p className="text-sm break-words leading-relaxed">{renderMessageContent(msg.content)}</p>
               )}
 
               <div className={`flex items-center gap-1 mt-1 ${isMine ? 'justify-end' : 'justify-start'}`}>
@@ -490,6 +543,291 @@ function EditHistoryModal({ message, onClose }) {
   );
 }
 
+function GroupInfoPanel({
+  conversation,
+  role,
+  canModerate,
+  currentUserId,
+  pinnedMessages,
+  pinnedLoading,
+  onClose,
+  onJumpTo,
+  onUnpin,
+  onFetchJoinRequests,
+  joinRequests,
+  joinRequestsLoading,
+  onRespondRequest,
+  onUpdateRules,
+  onCreateInvite,
+  onSetRole,
+  latestInviteCode,
+  setLatestInviteCode,
+}) {
+  const [rulesDraft, setRulesDraft] = useState('');
+  const [savingRules, setSavingRules] = useState(false);
+  const [creatingInvite, setCreatingInvite] = useState(false);
+  const isAdmin = role === 'admin';
+
+  const getMemberRole = (memberId) => {
+    const roles = conversation?.roles;
+    if (!roles) return 'member';
+    if (typeof roles.get === 'function') return roles.get(String(memberId)) || 'member';
+    return roles[String(memberId)] || 'member';
+  };
+
+  useEffect(() => {
+    setRulesDraft(conversation?.groupRules?.text || '');
+  }, [conversation]);
+
+  const handleSaveRules = async () => {
+    if (!conversation?._id) return;
+    try {
+      setSavingRules(true);
+      await onUpdateRules(conversation._id, rulesDraft);
+    } finally {
+      setSavingRules(false);
+    }
+  };
+
+  const handleCreateInvite = async () => {
+    if (!conversation?._id) return;
+    try {
+      setCreatingInvite(true);
+      await onCreateInvite(conversation._id, {});
+    } finally {
+      setCreatingInvite(false);
+    }
+  };
+
+  const handleCopyInvite = async () => {
+    if (!latestInviteCode) return;
+    const url = `${window.location.origin}/messages?invite=${latestInviteCode}`;
+    await navigator.clipboard.writeText(url);
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.92, y: 18 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.92, y: 18 }}
+        onClick={(e) => e.stopPropagation()}
+        className="bg-white dark:bg-dark-card rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden"
+      >
+        <div className="p-4 border-b border-gray-100 dark:border-dark-border flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-gray-800 dark:text-dark-text text-lg">Group info</h3>
+            <p className="text-xs text-gray-500 dark:text-dark-muted mt-0.5">Role: {role}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 dark:hover:text-dark-text"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="max-h-[70vh] overflow-y-auto p-4 space-y-6">
+          <div>
+            <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">Group rules</h4>
+            {canModerate ? (
+              <>
+                <textarea
+                  value={rulesDraft}
+                  onChange={(e) => setRulesDraft(e.target.value)}
+                  rows={4}
+                  className="w-full text-sm rounded-xl border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg px-3 py-2 focus:ring-2 focus:ring-[#2563EB] focus:shadow-[0_0_0_3px_rgba(37,99,235,0.15)] outline-none"
+                  placeholder="Add group rules here..."
+                />
+                <div className="mt-2 flex gap-2">
+                  <button
+                    onClick={handleSaveRules}
+                    disabled={savingRules}
+                    className="px-3 py-1.5 rounded-lg bg-[#2563EB] text-white text-xs font-medium hover:bg-[#1D4ED8] disabled:opacity-50"
+                  >
+                    Save rules
+                  </button>
+                  {conversation?.groupRules?.updatedAt && (
+                    <span className="text-xs text-gray-400 flex items-center">
+                      Updated {new Date(conversation.groupRules.updatedAt).toLocaleDateString()}
+                    </span>
+                  )}
+                </div>
+              </>
+            ) : (
+              <p className="text-sm text-gray-600 dark:text-dark-muted whitespace-pre-wrap">
+                {conversation?.groupRules?.text || 'No rules set yet.'}
+              </p>
+            )}
+          </div>
+
+          <div>
+            <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">Invite link</h4>
+            {conversation?.groupSettings?.linkJoinEnabled === false ? (
+              <p className="text-xs text-gray-400">Invite links are disabled for this group.</p>
+            ) : (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleCreateInvite}
+                  disabled={creatingInvite}
+                  className="px-3 py-1.5 rounded-lg bg-[#DBEAFE] text-[#2563EB] text-xs font-medium hover:bg-[#BFDBFE] disabled:opacity-50"
+                >
+                  Create invite
+                </button>
+                {latestInviteCode && (
+                  <>
+                    <span className="text-xs text-gray-600 dark:text-dark-text">{latestInviteCode}</span>
+                    <button
+                      onClick={handleCopyInvite}
+                      className="px-2 py-1 rounded-md text-xs border border-gray-200 dark:border-dark-border text-gray-600 hover:bg-gray-50"
+                    >
+                      Copy link
+                    </button>
+                    <button
+                      onClick={() => setLatestInviteCode('')}
+                      className="text-xs text-gray-400 hover:text-gray-600"
+                    >
+                      Clear
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {canModerate && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text">Join requests</h4>
+                <button
+                  onClick={() => conversation?._id && onFetchJoinRequests(conversation._id)}
+                  className="text-xs text-[#2563EB] hover:text-[#1D4ED8]"
+                >
+                  Refresh
+                </button>
+              </div>
+              {joinRequestsLoading ? (
+                <p className="text-xs text-gray-400">Loading requests...</p>
+              ) : (
+                <div className="space-y-2">
+                  {joinRequests.length === 0 ? (
+                    <p className="text-xs text-gray-400">No pending requests.</p>
+                  ) : (
+                    joinRequests.map((req) => (
+                      <div key={req._id} className="flex items-center justify-between p-3 rounded-xl border border-gray-100 dark:border-dark-border">
+                        <div>
+                          <p className="text-sm text-gray-700 dark:text-dark-text">{req.userId?.name || 'Unknown'}</p>
+                          <p className="text-xs text-gray-400">{req.userId?.email}</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => onRespondRequest(conversation._id, req._id, 'approve')}
+                            className="px-2.5 py-1 rounded-lg bg-[#2563EB] text-white text-xs hover:bg-[#1D4ED8]"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => onRespondRequest(conversation._id, req._id, 'reject')}
+                            className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 text-xs hover:bg-gray-50"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div>
+            <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">Pinned messages</h4>
+            {pinnedLoading ? (
+              <p className="text-xs text-gray-400">Loading pins...</p>
+            ) : (
+              <div className="space-y-2">
+                {pinnedMessages.length === 0 ? (
+                  <p className="text-xs text-gray-400">No pinned messages.</p>
+                ) : (
+                  pinnedMessages.map((msg) => (
+                    <div key={msg._id} className="p-3 rounded-xl border border-gray-100 dark:border-dark-border">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-xs text-gray-500">{msg.senderId?.name || 'Unknown'}</p>
+                          <p className="text-sm text-gray-700 dark:text-dark-text truncate">{msg.content || 'Attachment'}</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => onJumpTo(msg._id)}
+                            className="text-xs text-[#2563EB] hover:text-[#1D4ED8]"
+                          >
+                            Jump
+                          </button>
+
+                      <div>
+                        <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">Members</h4>
+                        <div className="space-y-2">
+                          {(conversation?.participants || []).map((member) => {
+                            const memberId = member?._id || member?.id || member;
+                            const memberRole = getMemberRole(memberId);
+                            const isSelf = String(memberId) === String(currentUserId);
+                            return (
+                              <div key={String(memberId)} className="flex items-center justify-between p-3 rounded-xl border border-gray-100 dark:border-dark-border">
+                                <div>
+                                  <p className="text-sm text-gray-700 dark:text-dark-text">
+                                    {member?.name || 'Unknown'}{isSelf ? ' (You)' : ''}
+                                  </p>
+                                  <p className="text-xs text-gray-400">{member?.email}</p>
+                                </div>
+                                <div>
+                                  {isAdmin && !isSelf ? (
+                                    <select
+                                      value={memberRole}
+                                      onChange={(e) => onSetRole(conversation._id, memberId, e.target.value)}
+                                      className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white"
+                                    >
+                                      <option value="admin">admin</option>
+                                      <option value="moderator">moderator</option>
+                                      <option value="member">member</option>
+                                    </select>
+                                  ) : (
+                                    <span className="text-xs text-gray-500 capitalize">{memberRole}</span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                          {canModerate && (
+                            <button
+                              onClick={() => onUnpin(conversation._id, msg._id)}
+                              className="text-xs text-gray-400 hover:text-gray-600"
+                            >
+                              Unpin
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ─── Main ChatWindow ──────────────────────────────────
 export default function ChatWindow() {
   const {
@@ -503,12 +841,31 @@ export default function ChatWindow() {
     editMessage, deleteMessage, reactToMessage, forwardMessage,
     searchInConversation,
     hasMoreMessages, isLoadingMore, loadMoreMessages,
+    updateGroupRules,
+    createInviteLink,
+    fetchJoinRequests,
+    respondToJoinRequest,
+    setGroupRole,
+    pinnedMessages,
+    pinnedLoading,
+    fetchPinnedMessages,
+    pinMessage,
+    unpinMessage,
+    joinRequests,
+    joinRequestsLoading,
+    latestInviteCode,
+    setLatestInviteCode,
+    inviteBanner,
+    messagesLoadedFor,
+    messagesLoadedCount,
   } = useChat();
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [highlightedId, setHighlightedId] = useState(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyMessage, setHistoryMessage] = useState(null);
+  const [groupPanelOpen, setGroupPanelOpen] = useState(false);
+  const [bannerReady, setBannerReady] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const messagesEndRef = useRef(null);
@@ -526,6 +883,20 @@ export default function ChatWindow() {
     if (typeof raw.get === 'function') return raw.get(currentUserId) || null;
     return raw[currentUserId] || null;
   }, [currentConversation, currentUserId]);
+
+  const role = useMemo(() => {
+    const roles = currentConversation?.roles;
+    if (!roles) return 'member';
+    if (typeof roles.get === 'function') return roles.get(currentUserId) || 'member';
+    return roles[currentUserId] || 'member';
+  }, [currentConversation, currentUserId]);
+
+  const canModerate = role === 'admin' || role === 'moderator';
+
+  const pinnedIdSet = useMemo(() => {
+    const items = currentConversation?.pinnedMessages || [];
+    return new Set(items.map((p) => String(p.messageId)));
+  }, [currentConversation]);
 
   const unreadCount = useMemo(() => {
     if (!messages.length) return 0;
@@ -556,6 +927,28 @@ export default function ChatWindow() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length]);
+
+  useEffect(() => {
+    let rafId = null;
+    setBannerReady(false);
+    if (!currentConversation?._id) return undefined;
+    rafId = requestAnimationFrame(() => setBannerReady(true));
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, [currentConversation?._id, messages.length]);
+
+  useEffect(() => {
+    if (currentConversation?.isGroup) {
+      fetchPinnedMessages(currentConversation._id);
+    }
+  }, [currentConversation, fetchPinnedMessages]);
+
+  useEffect(() => {
+    if (groupPanelOpen && currentConversation?.isGroup && canModerate) {
+      fetchJoinRequests(currentConversation._id);
+    }
+  }, [groupPanelOpen, currentConversation, canModerate, fetchJoinRequests]);
 
   // Maintain scroll position after loading older messages
   useEffect(() => {
@@ -645,7 +1038,7 @@ export default function ChatWindow() {
         className="flex-1 flex flex-col items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-dark-bg dark:to-dark-card"
       >
         <div className="text-center">
-          <div className="text-6xl mb-4">💬</div>
+          <div className="w-24 h-24 rounded-full bg-[#DBEAFE] flex items-center justify-center text-5xl mb-4">💬</div>
           <p className="text-gray-600 dark:text-dark-text text-lg font-medium">No conversation selected</p>
           <p className="text-gray-400 dark:text-dark-muted text-sm">Select a chat to start messaging</p>
         </div>
@@ -676,6 +1069,15 @@ export default function ChatWindow() {
 
         {/* Search toggle */}
         <div className="flex items-center gap-2">
+          {currentConversation?.isGroup && (
+            <button
+              onClick={() => setGroupPanelOpen(true)}
+              className="p-2 rounded-lg text-sm transition hover:bg-gray-100 dark:hover:bg-dark-hover text-gray-500 dark:text-dark-muted"
+              title="Group info"
+            >
+              👥
+            </button>
+          )}
           {firstUnreadMessageId && (
             <button
               onClick={handleJumpToFirstUnread}
@@ -692,6 +1094,24 @@ export default function ChatWindow() {
           </button>
         </div>
       </div>
+
+      <AnimatePresence>
+        {inviteBanner?.conversationId === currentConversation?._id &&
+          inviteBanner?.message &&
+          messagesLoadedFor === String(currentConversation?._id) &&
+          (messages.length > 0 || messagesLoadedCount === 0) &&
+          bannerReady && (
+          <motion.div
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.2 }}
+            className="px-4 py-2 text-xs text-[#2563EB] bg-[#DBEAFE] border-b border-[#BFDBFE]"
+          >
+            {inviteBanner.message}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ─── Search bar ──────────────────────────────── */}
       <AnimatePresence>
@@ -718,7 +1138,7 @@ export default function ChatWindow() {
             <motion.div
               animate={{ rotate: 360 }}
               transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
-              className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full"
+              className="w-6 h-6 border-2 border-[#2563EB] border-t-transparent rounded-full"
             />
           </div>
         )}
@@ -728,7 +1148,7 @@ export default function ChatWindow() {
           <div className="flex justify-center py-2">
             <button
               onClick={loadMoreMessages}
-              className="text-sm text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
+              className="text-sm text-[#2563EB] hover:text-[#1D4ED8] font-medium"
             >
               ↑ Load older messages
             </button>
@@ -739,6 +1159,7 @@ export default function ChatWindow() {
           const senderId = typeof msg.senderId === 'object' ? String(msg.senderId?._id) : String(msg.senderId);
           const isMine = senderId === currentUserId;
           const isHighlighted = highlightedId === msg._id;
+          const isPinned = pinnedIdSet.has(String(msg._id));
           const readByList = Array.isArray(msg.readBy) ? msg.readBy : [];
           const readByOthers = readByList.filter((entry) => {
             const userId = entry?.userId || entry;
@@ -773,12 +1194,17 @@ export default function ChatWindow() {
                 isMine={isMine}
                 currentUserId={currentUserId}
                 readStatus={readStatus}
+                isGroup={currentConversation?.isGroup}
+                isPinned={isPinned}
+                canModerate={canModerate}
                 onReply={setReplyingTo}
                 onEdit={setEditingMessage}
                 onDelete={deleteMessage}
                 onForward={(msg) => { setMessageToForward(msg); setForwardModalOpen(true); }}
                 onReact={reactToMessage}
                 onViewHistory={(msg) => { setHistoryMessage(msg); setHistoryOpen(true); }}
+                onPin={(messageId) => pinMessage(currentConversation._id, messageId)}
+                onUnpin={(messageId) => unpinMessage(currentConversation._id, messageId)}
               />
             </div>
           );
@@ -813,6 +1239,32 @@ export default function ChatWindow() {
 
       {/* ─── Message Input (with reply/edit context) ── */}
       <MessageInput />
+
+      {/* ─── Group Info Panel ───────────────────────── */}
+      <AnimatePresence>
+        {groupPanelOpen && currentConversation?.isGroup && (
+          <GroupInfoPanel
+            conversation={currentConversation}
+            role={role}
+            canModerate={canModerate}
+            currentUserId={currentUserId}
+            pinnedMessages={pinnedMessages}
+            pinnedLoading={pinnedLoading}
+            onClose={() => setGroupPanelOpen(false)}
+            onJumpTo={handleJumpTo}
+            onUnpin={unpinMessage}
+            onFetchJoinRequests={fetchJoinRequests}
+            joinRequests={joinRequests}
+            joinRequestsLoading={joinRequestsLoading}
+            onRespondRequest={respondToJoinRequest}
+            onUpdateRules={updateGroupRules}
+            onCreateInvite={createInviteLink}
+            onSetRole={setGroupRole}
+            latestInviteCode={latestInviteCode}
+            setLatestInviteCode={setLatestInviteCode}
+          />
+        )}
+      </AnimatePresence>
 
       {/* ─── Forward Modal ────────────────────────────── */}
       <AnimatePresence>
