@@ -19,8 +19,16 @@ export const initializeSocket = (io) => {
     // ─── User online ──────────────────────────────────
     socket.on('user-online', async (userId) => {
       onlineUsers.set(userId, socket.id);
+      socket.join(userId.toString()); // Join personal room for direct events
+      await User.findByIdAndUpdate(userId, { isOnline: true });
       await updateLastSeen(userId);
-      socket.broadcast.emit('user-status', { userId, status: 'online', timestamp: new Date() });
+      // Notify all friends
+      const user = await User.findById(userId).select('friends');
+      if (user && user.friends) {
+        user.friends.forEach(fid => {
+          io.to(fid.toString()).emit('user_online', { userId, timestamp: new Date() });
+        });
+      }
     });
 
     // ─── Join / leave conversation room ───────────────
@@ -119,8 +127,15 @@ export const initializeSocket = (io) => {
       }
       if (userId) {
         onlineUsers.delete(userId);
+        await User.findByIdAndUpdate(userId, { isOnline: false, lastSeen: new Date() });
         await updateLastSeen(userId);
-        socket.broadcast.emit('user-status', { userId, status: 'offline', timestamp: new Date() });
+        // Notify all friends
+        const user = await User.findById(userId).select('friends');
+        if (user && user.friends) {
+          user.friends.forEach(fid => {
+            io.to(fid.toString()).emit('user_offline', { userId, timestamp: new Date() });
+          });
+        }
       }
     });
 

@@ -19,6 +19,7 @@ import { useChat } from '../context/ChatContext';
 const menuItems = [
   { id: 'dashboard', label: 'Home', icon: Home, description: 'Dashboard overview', path: '/dashboard' },
   { id: 'messages', label: 'Messages', icon: MessageSquare, description: 'Chat conversations', path: '/messages' },
+  { id: 'friends', label: 'Friends', icon: Users, description: 'Friends & Requests', path: '/friends' },
   { id: 'profile', label: 'Profile', icon: User, description: 'Account settings', path: '/profile' },
   { id: 'contacts', label: 'Contacts', icon: Users, description: 'Manage contacts', path: '/contacts' },
   { id: 'calls', label: 'Calls', icon: Phone, description: 'Call history', path: '/calls' },

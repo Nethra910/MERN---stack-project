@@ -70,6 +70,22 @@ const userSchema = new mongoose.Schema(
     lastSeen: {
       type: Date,
       default: Date.now
+    },
+
+    // 👫 Friends System
+    friends: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: []
+    }],
+    blockedUsers: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: []
+    }],
+    isOnline: {
+      type: Boolean,
+      default: false
     }
   },
   {
