@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import axios from '../api/axios';
 import useSocket from '../hooks/useSocket';
 import toast from 'react-hot-toast';
@@ -13,7 +13,10 @@ export const SocialProvider = ({ children }) => {
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [loading, setLoading] = useState({ friends: true, requests: true, blocked: true });
 
-  // Fetch initial data
+  // Ref to avoid stale closure in socket handlers
+  const fetchAllRef = useRef(null);
+
+  // ─── Fetch All Social Data ───────────────────────────────────────────────
   const fetchAll = useCallback(async () => {
     setLoading({ friends: true, requests: true, blocked: true });
     try {
@@ -32,63 +35,116 @@ export const SocialProvider = ({ children }) => {
     }
   }, []);
 
+  // Keep ref in sync so socket handlers always call latest version
+  useEffect(() => {
+    fetchAllRef.current = fetchAll;
+  }, [fetchAll]);
+
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  // Socket event listeners
+  // ─── Socket Event Listeners ──────────────────────────────────────────────
   useEffect(() => {
     if (!socket) return;
-    // Online/offline
-    socket.on('user_online', ({ userId }) => {
-      setFriends(friends => friends.map(f => f._id === userId ? { ...f, isOnline: true } : f));
-      setOnlineUsers(users => [...new Set([...users, userId])]);
-    });
-    socket.on('user_offline', ({ userId }) => {
-      setFriends(friends => friends.map(f => f._id === userId ? { ...f, isOnline: false } : f));
-      setOnlineUsers(users => users.filter(id => id !== userId));
-    });
-    // Friend request received
-    socket.on('friend_request_received', ({ request }) => {
-      setRequests(r => ({ ...r, incoming: [request, ...r.incoming] }));
-      toast.success('New friend request received');
-    });
-    // Friend request accepted
-    socket.on('friend_request_accepted', ({ userId }) => {
-      fetchAll();
-      toast.success('Friend request accepted');
-    });
-    // Friend removed
-    socket.on('friend_removed', ({ userId }) => {
-      setFriends(friends => friends.filter(f => f._id !== userId));
-      toast('A friend was removed');
-    });
-    // User blocked/unblocked
-    socket.on('user_blocked', ({ userId }) => {
-      setBlocked(blocked => [...blocked, { _id: userId }]);
-      setFriends(friends => friends.filter(f => f._id !== userId));
-      toast('User blocked');
-    });
-    socket.on('user_unblocked', ({ userId }) => {
-      setBlocked(blocked => blocked.filter(u => u._id !== userId));
-      toast('User unblocked');
-    });
-    // Cleanup
-    return () => {
-      socket.off('user_online');
-      socket.off('user_offline');
-      socket.off('friend_request_received');
-      socket.off('friend_request_accepted');
-      socket.off('friend_removed');
-      socket.off('user_blocked');
-      socket.off('user_unblocked');
-    };
-  }, [socket, fetchAll]);
 
-  // Centralized social actions
+    // Online / offline presence
+    const onUserOnline = ({ userId }) => {
+      setFriends(prev => prev.map(f => f._id === userId ? { ...f, isOnline: true } : f));
+      setOnlineUsers(prev => [...new Set([...prev, userId])]);
+    };
+    const onUserOffline = ({ userId }) => {
+      setFriends(prev => prev.map(f => f._id === userId ? { ...f, isOnline: false } : f));
+      setOnlineUsers(prev => prev.filter(id => id !== userId));
+    };
+
+    // Incoming friend request
+    const onRequestReceived = ({ request }) => {
+      setRequests(prev => ({
+        ...prev,
+        incoming: [request, ...prev.incoming],
+      }));
+      toast.success(`${request.senderId?.name || 'Someone'} sent you a friend request`);
+    };
+
+    // Friend request cancelled by sender
+    const onRequestCancelled = ({ requestId }) => {
+      setRequests(prev => ({
+        ...prev,
+        incoming: prev.incoming.filter(r => r._id !== requestId),
+      }));
+    };
+
+    // Friend request accepted — only re-fetch data (no toast: the action itself shows it)
+    const onRequestAccepted = () => {
+      fetchAllRef.current?.();
+    };
+
+    // Friend request rejected — remove from outgoing
+    const onRequestRejected = ({ userId }) => {
+      setRequests(prev => ({
+        ...prev,
+        outgoing: prev.outgoing.filter(r => r.receiverId?._id !== userId),
+      }));
+    };
+
+    // Friend removed
+    const onFriendRemoved = ({ userId }) => {
+      setFriends(prev => prev.filter(f => f._id !== userId));
+    };
+
+    // Blocked / unblocked
+    const onUserBlocked = ({ userId }) => {
+      setFriends(prev => prev.filter(f => f._id !== userId));
+    };
+    const onUserUnblocked = () => {
+      // No action needed client-side; user can re-send request manually
+    };
+
+    socket.on('user_online', onUserOnline);
+    socket.on('user_offline', onUserOffline);
+    socket.on('friend_request_received', onRequestReceived);
+    socket.on('friend_request_cancelled', onRequestCancelled);
+    socket.on('friend_request_accepted', onRequestAccepted);
+    socket.on('friend_request_rejected', onRequestRejected);
+    socket.on('friend_removed', onFriendRemoved);
+    socket.on('user_blocked', onUserBlocked);
+    socket.on('user_unblocked', onUserUnblocked);
+
+    return () => {
+      socket.off('user_online', onUserOnline);
+      socket.off('user_offline', onUserOffline);
+      socket.off('friend_request_received', onRequestReceived);
+      socket.off('friend_request_cancelled', onRequestCancelled);
+      socket.off('friend_request_accepted', onRequestAccepted);
+      socket.off('friend_request_rejected', onRequestRejected);
+      socket.off('friend_removed', onFriendRemoved);
+      socket.off('user_blocked', onUserBlocked);
+      socket.off('user_unblocked', onUserUnblocked);
+    };
+  }, [socket]);
+
+  // ─── Actions ─────────────────────────────────────────────────────────────
+
+  const sendFriendRequest = async (receiverId) => {
+    try {
+      const res = await axios.post('/friends/request', { receiverId });
+      toast.success(res.data.message || 'Friend request sent');
+      // Refresh outgoing list
+      await fetchAll();
+    } catch (e) {
+      toast.error(e?.response?.data?.message || 'Failed to send request');
+    }
+  };
+
   const acceptRequest = async (requestId) => {
     try {
       await axios.post('/friends/request/accept', { requestId });
-      setRequests(r => ({ ...r, incoming: r.incoming.filter(req => req._id !== requestId) }));
-      toast.success('Friend request accepted');
+      // Optimistically remove from incoming
+      setRequests(prev => ({
+        ...prev,
+        incoming: prev.incoming.filter(r => r._id !== requestId),
+      }));
+      toast.success('Friend request accepted!');
+      // Fetch to get the new friend in the list
       fetchAll();
     } catch (e) {
       toast.error(e?.response?.data?.message || 'Failed to accept request');
@@ -98,23 +154,33 @@ export const SocialProvider = ({ children }) => {
   const rejectRequest = async (requestId) => {
     try {
       await axios.post('/friends/request/reject', { requestId });
-      setRequests(r => ({ ...r, incoming: r.incoming.filter(req => req._id !== requestId) }));
-      toast('Friend request rejected');
+      setRequests(prev => ({
+        ...prev,
+        incoming: prev.incoming.filter(r => r._id !== requestId),
+      }));
+      toast('Request declined');
     } catch (e) {
       toast.error(e?.response?.data?.message || 'Failed to reject request');
     }
   };
 
   const cancelRequest = async (requestId) => {
-    // Optionally implement cancel outgoing request API if available
-    setRequests(r => ({ ...r, outgoing: r.outgoing.filter(req => req._id !== requestId) }));
-    toast('Request cancelled');
+    try {
+      await axios.post('/friends/request/cancel', { requestId });
+      setRequests(prev => ({
+        ...prev,
+        outgoing: prev.outgoing.filter(r => r._id !== requestId),
+      }));
+      toast('Request cancelled');
+    } catch (e) {
+      toast.error(e?.response?.data?.message || 'Failed to cancel request');
+    }
   };
 
   const removeFriend = async (friendId) => {
     try {
       await axios.delete(`/friends/${friendId}`);
-      setFriends(friends => friends.filter(f => f._id !== friendId));
+      setFriends(prev => prev.filter(f => f._id !== friendId));
       toast('Friend removed');
     } catch (e) {
       toast.error(e?.response?.data?.message || 'Failed to remove friend');
@@ -124,8 +190,8 @@ export const SocialProvider = ({ children }) => {
   const blockUser = async (userId) => {
     try {
       await axios.post(`/friends/block/${userId}`);
-      setBlocked(blocked => [...blocked, { _id: userId }]);
-      setFriends(friends => friends.filter(f => f._id !== userId));
+      // fetchAll to get full blocked user data (name, avatar, etc.)
+      await fetchAll();
       toast('User blocked');
     } catch (e) {
       toast.error(e?.response?.data?.message || 'Failed to block user');
@@ -135,22 +201,46 @@ export const SocialProvider = ({ children }) => {
   const unblockUser = async (userId) => {
     try {
       await axios.post(`/friends/unblock/${userId}`);
-      setBlocked(blocked => blocked.filter(u => u._id !== userId));
+      setBlocked(prev => prev.filter(u => u._id !== userId));
       toast('User unblocked');
     } catch (e) {
       toast.error(e?.response?.data?.message || 'Failed to unblock user');
     }
   };
 
+  // ─── Derived state ────────────────────────────────────────────────────────
+  const pendingRequestCount = requests.incoming.length;
+
   return (
     <SocialContext.Provider value={{
-      friends, requests, blocked, onlineUsers, loading, fetchAll,
-      setFriends, setRequests, setBlocked,
-      acceptRequest, rejectRequest, cancelRequest, removeFriend, blockUser, unblockUser
+      // State
+      friends,
+      requests,
+      blocked,
+      onlineUsers,
+      loading,
+      pendingRequestCount,
+      // Setters (for advanced usage)
+      setFriends,
+      setRequests,
+      setBlocked,
+      // Actions
+      fetchAll,
+      sendFriendRequest,
+      acceptRequest,
+      rejectRequest,
+      cancelRequest,
+      removeFriend,
+      blockUser,
+      unblockUser,
     }}>
       {children}
     </SocialContext.Provider>
   );
 };
 
-export const useSocial = () => useContext(SocialContext);
+export const useSocial = () => {
+  const context = useContext(SocialContext);
+  if (!context) throw new Error('useSocial must be used inside <SocialProvider>');
+  return context;
+};
