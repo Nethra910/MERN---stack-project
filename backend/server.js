@@ -10,6 +10,7 @@ import profileRoutes from './routes/profileRoutes.js'; // ✅ NEW: Profile route
 import friendsRoutes from './routes/friendsRoutes.js';
 import errorHandler from './middleware/errorMiddleware.js';
 import { initializeSocket } from './utils/socketHandler.js';
+import chatRequestRoutes from './routes/chatRequestRoutes.js';
 
 dotenv.config();
 
@@ -100,11 +101,13 @@ app.get('/', (req, res) => {
   });
 });
 
+// API; Routes
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
-
 app.use('/api/friends', friendsRoutes);
+app.use('/api/chat-requests', chatRequestRoutes);  
+app.use('/api/profile', profileRoutes);            
 
 // 404 Handler
 app.use((req, res) => {

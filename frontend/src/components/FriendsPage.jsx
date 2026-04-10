@@ -1,17 +1,43 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import FriendList from '../components/FriendList';
 import FriendRequests from '../components/FriendRequests';
 import BlockedUsers from '../components/BlockedUsers';
+import { useChat } from '../context/ChatContext';
 import { useSocial } from '../context/SocialContext';
 
 const FriendsPage = () => {
   const [tab, setTab] = useState('friends');
-  const { friends, requests, blocked, pendingRequestCount } = useSocial();
+  const { conversations } = useChat();
+  const { requests, blocked } = useSocial();
+
+  const currentUserId = useMemo(() => {
+    try {
+      const u = JSON.parse(localStorage.getItem('user') || '{}');
+      return String(u.id || u._id || '');
+    } catch { return ''; }
+  }, []);
+
+  // Count unique 1-to-1 chat partners (same logic as FriendList)
+  const contactCount = useMemo(() => {
+    const seen = new Set();
+    conversations
+      .filter(c => !c.isGroup)
+      .forEach(c => {
+        const other = c.participants?.find(
+          p => String(p._id || p.id) !== currentUserId
+        );
+        if (other?._id) seen.add(String(other._id));
+      });
+    return seen.size;
+  }, [conversations, currentUserId]);
+
+  const pendingRequestCount = requests?.incoming?.length || 0;
+  const blockedCount = blocked?.length || 0;
 
   const tabs = [
-    { key: 'friends', label: 'Friends', count: friends.length },
+    { key: 'friends',  label: 'Friends',  count: contactCount },
     { key: 'requests', label: 'Requests', count: pendingRequestCount, highlight: pendingRequestCount > 0 },
-    { key: 'blocked', label: 'Blocked', count: blocked.length },
+    { key: 'blocked',  label: 'Blocked',  count: blockedCount },
   ];
 
   return (
@@ -22,7 +48,8 @@ const FriendsPage = () => {
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-white">Friends</h1>
           <p className="text-gray-400 text-sm mt-1">
-            {friends.length} friend{friends.length !== 1 ? 's' : ''} · {pendingRequestCount} pending request{pendingRequestCount !== 1 ? 's' : ''}
+            {contactCount} contact{contactCount !== 1 ? 's' : ''}
+            {pendingRequestCount > 0 && ` · ${pendingRequestCount} pending request${pendingRequestCount !== 1 ? 's' : ''}`}
           </p>
         </div>
 
@@ -61,9 +88,9 @@ const FriendsPage = () => {
 
         {/* Tab Content */}
         <div>
-          {tab === 'friends' && <FriendList />}
+          {tab === 'friends'  && <FriendList />}
           {tab === 'requests' && <FriendRequests />}
-          {tab === 'blocked' && <BlockedUsers />}
+          {tab === 'blocked'  && <BlockedUsers />}
         </div>
       </div>
     </div>

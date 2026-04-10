@@ -1,9 +1,7 @@
-// No unused imports — socket only handles real-time relay
 import User from '../models/User.js';
 
 const onlineUsers = new Map();
 
-// Helper to update lastSeen in database
 const updateLastSeen = async (userId) => {
   try {
     await User.findByIdAndUpdate(userId, { lastSeen: new Date() });
@@ -19,19 +17,18 @@ export const initializeSocket = (io) => {
     // ─── User online ──────────────────────────────────
     socket.on('user-online', async (userId) => {
       onlineUsers.set(userId, socket.id);
-      socket.join(userId.toString()); // Join personal room for direct events
+      socket.join(userId.toString());
       await User.findByIdAndUpdate(userId, { isOnline: true });
       await updateLastSeen(userId);
-      // Notify all friends
       const user = await User.findById(userId).select('friends');
-      if (user && user.friends) {
+      if (user?.friends) {
         user.friends.forEach(fid => {
           io.to(fid.toString()).emit('user_online', { userId, timestamp: new Date() });
         });
       }
     });
 
-    // ─── Join / leave conversation room ───────────────
+    // ─── Join / leave conversation rooms ──────────────
     socket.on('join-conversation', (conversationId) => {
       socket.join(`conversation:${conversationId}`);
     });
@@ -43,8 +40,7 @@ export const initializeSocket = (io) => {
     // ─── Send message ─────────────────────────────────
     socket.on('send-message', async (data) => {
       try {
-        const { conversationId, senderId, content, messageId, replyTo } = data;
-        // Update sender's lastSeen on activity
+        const { conversationId, senderId, content, messageId, replyTo, attachments } = data;
         await updateLastSeen(senderId);
         io.to(`conversation:${conversationId}`).emit('receive-message', {
           conversationId,
@@ -52,6 +48,7 @@ export const initializeSocket = (io) => {
           content,
           messageId,
           replyTo,
+          attachments,
           timestamp: new Date(),
         });
       } catch (error) {
@@ -59,41 +56,31 @@ export const initializeSocket = (io) => {
       }
     });
 
-    // ─── NEW: Edit message ─────────────────────────────
+    // ─── Edit message ─────────────────────────────────
     socket.on('edit-message', (data) => {
       const { conversationId, messageId, content } = data;
-      // Broadcast to all other participants in the room
       socket.to(`conversation:${conversationId}`).emit('message-edited', {
-        conversationId,
-        messageId,
-        content,
-        editedAt: new Date(),
+        conversationId, messageId, content, editedAt: new Date(),
       });
     });
 
-    // ─── NEW: Delete message ───────────────────────────
+    // ─── Delete message ───────────────────────────────
     socket.on('delete-message', (data) => {
       const { conversationId, messageId, deleteFor, deletedBy } = data;
       socket.to(`conversation:${conversationId}`).emit('message-deleted', {
-        conversationId,
-        messageId,
-        deleteFor,
-        deletedBy, // Include deletedBy array for 'self' deletions
-        deletedAt: new Date(),
+        conversationId, messageId, deleteFor, deletedBy, deletedAt: new Date(),
       });
     });
 
-    // ─── NEW: React to message ─────────────────────────
+    // ─── React to message ─────────────────────────────
     socket.on('react-message', (data) => {
       const { conversationId, messageId, reactions } = data;
       socket.to(`conversation:${conversationId}`).emit('message-reacted', {
-        conversationId,
-        messageId,
-        reactions,
+        conversationId, messageId, reactions,
       });
     });
 
-    // ─── NEW: Forward message ──────────────────────────
+    // ─── Forward message ──────────────────────────────
     socket.on('forward-message', (data) => {
       const { targetConversationIds, message } = data;
       targetConversationIds.forEach((convId) => {
@@ -105,11 +92,10 @@ export const initializeSocket = (io) => {
       });
     });
 
-    // ─── Typing indicators ─────────────────────────────
+    // ─── Typing ───────────────────────────────────────
     socket.on('typing', ({ conversationId, userId }) => {
       socket.broadcast.to(`conversation:${conversationId}`).emit('user-typing', {
-        conversationId,
-        userId,
+        conversationId, userId,
       });
     });
 
@@ -119,7 +105,16 @@ export const initializeSocket = (io) => {
       });
     });
 
-    // ─── Disconnect ────────────────────────────────────
+    // ─── NEW: Chat request events (relay only) ────────
+    // These are emitted by the REST controller via io.to()
+    // Socket just needs to relay them — no logic here needed.
+    // The controller emits: chat_request_received, chat_request_accepted,
+    // chat_request_rejected, chat_request_cancelled
+
+    // ─── NEW: Block events (relay only) ───────────────
+    // The controller emits: user_blocked_by, user_unblocked_by
+
+    // ─── Disconnect ───────────────────────────────────
     socket.on('disconnect', async () => {
       let userId;
       for (const [key, value] of onlineUsers.entries()) {
@@ -128,10 +123,8 @@ export const initializeSocket = (io) => {
       if (userId) {
         onlineUsers.delete(userId);
         await User.findByIdAndUpdate(userId, { isOnline: false, lastSeen: new Date() });
-        await updateLastSeen(userId);
-        // Notify all friends
         const user = await User.findById(userId).select('friends');
-        if (user && user.friends) {
+        if (user?.friends) {
           user.friends.forEach(fid => {
             io.to(fid.toString()).emit('user_offline', { userId, timestamp: new Date() });
           });
