@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useSocial } from '../context/SocialContext';
+import { useChatRequest } from '../context/ChatRequestContext';
+import { useChat } from '../context/ChatContext';
 
 const timeAgo = (date) => {
   if (!date) return '';
@@ -31,34 +32,44 @@ const RequestSkeleton = () => (
 
 const IncomingRequestCard = ({ req }) => {
   const navigate = useNavigate();
-  const { acceptRequest, rejectRequest } = useSocial();
-  const [loading, setLoading] = useState(null); // 'accept' | 'reject'
+  const { acceptRequest, rejectRequest } = useChatRequest();
+  const { fetchConversations } = useChat();
+  const [loading, setLoading] = useState(null);
 
   const handleAccept = async () => {
     setLoading('accept');
-    await acceptRequest(req._id);
-    setLoading(null);
+    try {
+      const result = await acceptRequest(req._id);
+      await fetchConversations();
+      if (result?.conversationId) {
+        navigate(`/messages/chat/${result.conversationId}`);
+      }
+    } finally {
+      setLoading(null);
+    }
   };
 
   const handleReject = async () => {
     setLoading('reject');
-    await rejectRequest(req._id);
-    setLoading(null);
+    try {
+      await rejectRequest(req._id);
+    } finally {
+      setLoading(null);
+    }
   };
 
   const user = req.senderId;
 
   return (
     <div className="flex items-center gap-3 p-3 rounded-xl hover:bg-gray-800/40 transition-colors group">
-      <button
-        onClick={() => navigate(`/profile/${user?._id}`)}
-        className="flex-shrink-0"
-      >
+      <button onClick={() => navigate(`/profile/${user?._id}`)} className="flex-shrink-0">
         <img
           src={user?.profilePicture || '/default-avatar.png'}
           alt={user?.name}
           className="w-11 h-11 rounded-full object-cover bg-gray-700 hover:ring-2 hover:ring-blue-500 transition-all"
-          onError={(e) => { e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name || 'U')}&background=374151&color=fff`; }}
+          onError={(e) => {
+            e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name || 'U')}&background=374151&color=fff`;
+          }}
         />
       </button>
 
@@ -67,11 +78,9 @@ const IncomingRequestCard = ({ req }) => {
           onClick={() => navigate(`/profile/${user?._id}`)}
           className="text-white font-medium text-sm hover:underline truncate block text-left"
         >
-          {user?.name}
+          {user?.name || 'Unknown'}
         </button>
-        {user?.bio && (
-          <p className="text-gray-500 text-xs truncate">{user.bio}</p>
-        )}
+        {user?.bio && <p className="text-gray-500 text-xs truncate">{user.bio}</p>}
         <p className="text-gray-600 text-xs mt-0.5">{timeAgo(req.createdAt)}</p>
       </div>
 
@@ -102,13 +111,16 @@ const IncomingRequestCard = ({ req }) => {
 
 const OutgoingRequestCard = ({ req }) => {
   const navigate = useNavigate();
-  const { cancelRequest } = useSocial();
+  const { cancelRequest } = useChatRequest();
   const [loading, setLoading] = useState(false);
 
   const handleCancel = async () => {
     setLoading(true);
-    await cancelRequest(req._id);
-    setLoading(false);
+    try {
+      await cancelRequest(req._id);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const user = req.receiverId;
@@ -120,12 +132,14 @@ const OutgoingRequestCard = ({ req }) => {
           src={user?.profilePicture || '/default-avatar.png'}
           alt={user?.name}
           className="w-11 h-11 rounded-full object-cover bg-gray-700 flex-shrink-0"
-          onError={(e) => { e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name || 'U')}&background=374151&color=fff`; }}
+          onError={(e) => {
+            e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name || 'U')}&background=374151&color=fff`;
+          }}
         />
       </button>
 
       <div className="flex-1 min-w-0">
-        <p className="text-white font-medium text-sm truncate">{user?.name}</p>
+        <p className="text-white font-medium text-sm truncate">{user?.name || 'Unknown'}</p>
         <p className="text-gray-500 text-xs">Pending · {timeAgo(req.createdAt)}</p>
       </div>
 
@@ -140,17 +154,20 @@ const OutgoingRequestCard = ({ req }) => {
   );
 };
 
+// ─── Main component ────────────────────────────────────
 const FriendRequests = () => {
-  const { requests, loading } = useSocial();
+  // ✅ FIXED: was useSocial() — switched to useChatRequest()
+  // useSocial has no knowledge of chat requests — they live in ChatRequestContext
+  const { incomingRequests, outgoingRequests, loading } = useChatRequest();
 
-  if (loading.requests) return (
+  if (loading) return (
     <div className="space-y-1">
       {[...Array(3)].map((_, i) => <RequestSkeleton key={i} />)}
     </div>
   );
 
-  const hasIncoming = requests.incoming.length > 0;
-  const hasOutgoing = requests.outgoing.length > 0;
+  const hasIncoming = incomingRequests.length > 0;
+  const hasOutgoing = outgoingRequests.length > 0;
 
   if (!hasIncoming && !hasOutgoing) {
     return (
@@ -161,45 +178,39 @@ const FriendRequests = () => {
           </svg>
         </div>
         <p className="text-gray-400 font-medium">No pending requests</p>
-        <p className="text-gray-600 text-sm mt-1">Friend requests you send or receive will appear here</p>
+        <p className="text-gray-600 text-sm mt-1">Chat requests you send or receive will appear here</p>
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      {/* Incoming */}
       {hasIncoming && (
         <div>
           <div className="flex items-center gap-2 mb-3">
-            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-              Incoming
-            </h3>
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Incoming</h3>
             <span className="bg-blue-600 text-white text-xs px-1.5 py-0.5 rounded-full font-medium">
-              {requests.incoming.length}
+              {incomingRequests.length}
             </span>
           </div>
           <div className="space-y-1">
-            {requests.incoming.map(req => (
+            {incomingRequests.map(req => (
               <IncomingRequestCard key={req._id} req={req} />
             ))}
           </div>
         </div>
       )}
 
-      {/* Outgoing */}
       {hasOutgoing && (
         <div>
           <div className="flex items-center gap-2 mb-3">
-            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-              Sent
-            </h3>
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Sent</h3>
             <span className="bg-gray-700 text-gray-300 text-xs px-1.5 py-0.5 rounded-full font-medium">
-              {requests.outgoing.length}
+              {outgoingRequests.length}
             </span>
           </div>
           <div className="space-y-1">
-            {requests.outgoing.map(req => (
+            {outgoingRequests.map(req => (
               <OutgoingRequestCard key={req._id} req={req} />
             ))}
           </div>
