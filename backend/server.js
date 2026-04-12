@@ -6,11 +6,12 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import authRoutes from './routes/authRoutes.js';
 import chatRoutes from './routes/chatRoutes.js';
-import profileRoutes from './routes/profileRoutes.js'; // ✅ NEW: Profile routes
+import profileRoutes from './routes/profileRoutes.js';
 import friendsRoutes from './routes/friendsRoutes.js';
 import errorHandler from './middleware/errorMiddleware.js';
 import { initializeSocket } from './utils/socketHandler.js';
 import chatRequestRoutes from './routes/chatRequestRoutes.js';
+import callRoutes from './routes/callRoutes.js'; // ✅ NEW
 
 dotenv.config();
 
@@ -54,7 +55,7 @@ const io = new Server(server, {
 initializeSocket(io);
 
 // Middleware - Body Parsing with size limits
-app.use(express.json({ limit: '1mb' })); // Reduced from 10mb for security
+app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // CORS Setup - Strict origin validation
@@ -69,8 +70,6 @@ app.use((req, res, next) => {
   ].filter(Boolean);
 
   const origin = req.headers.origin;
-  
-  // Only allow whitelisted origins
   if (origin && allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -78,7 +77,7 @@ app.use((req, res, next) => {
 
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-  res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
+  res.setHeader('Access-Control-Max-Age', '86400');
 
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
@@ -101,13 +100,13 @@ app.get('/', (req, res) => {
   });
 });
 
-// API; Routes
-// API Routes
+// ✅ API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/friends', friendsRoutes);
-app.use('/api/chat-requests', chatRequestRoutes);  
-app.use('/api/profile', profileRoutes);            
+app.use('/api/chat-requests', chatRequestRoutes);
+app.use('/api/profile', profileRoutes);
+app.use('/api/calls', callRoutes); // ✅ NEW
 
 // 404 Handler
 app.use((req, res) => {
@@ -148,6 +147,7 @@ mongoose
       console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`🔗 API: http://localhost:${PORT}/api`);
       console.log(`💬 WebSocket: ws://localhost:${PORT}`);
+      console.log(`📞 Calls API: http://localhost:${PORT}/api/calls`); // ✅ NEW
       console.log(`📧 Client URL: ${process.env.CLIENT_URL || 'Not set'}`);
     });
   })
@@ -157,20 +157,16 @@ mongoose
     process.exit(1);
   });
 
-// Handle Unhandled Rejections & Exceptions
 process.on('unhandledRejection', (err) => {
   console.error('❌ Unhandled Promise Rejection:', err);
-  console.log('🔄 Shutting down server...');
   process.exit(1);
 });
 
 process.on('uncaughtException', (err) => {
   console.error('❌ Uncaught Exception:', err);
-  console.log('🔄 Shutting down server...');
   process.exit(1);
 });
 
-// Graceful Shutdown
 process.on('SIGTERM', () => {
   console.log('👋 SIGTERM received. Shutting down gracefully...');
   mongoose.connection.close(() => {

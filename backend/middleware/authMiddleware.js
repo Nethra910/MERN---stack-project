@@ -6,7 +6,6 @@ import ApiResponse from '../utils/ApiResponse.js';
 // ✅ Enhanced protect middleware with better error handling
 const protect = async (req, res, next) => {
   try {
-    // ✅ Get token from header
     const authHeader = req.headers.authorization;
     
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -19,7 +18,6 @@ const protect = async (req, res, next) => {
       throw new ApiError(401, 'Access denied. No token provided.');
     }
 
-    // ✅ Verify token with specific error messages
     let decoded;
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET);
@@ -33,27 +31,28 @@ const protect = async (req, res, next) => {
       throw new ApiError(401, 'Token verification failed.');
     }
 
-    // ✅ Check if user still exists
     const user = await User.findById(decoded.id).select('-password');
     
     if (!user) {
       throw new ApiError(401, 'User no longer exists.');
     }
 
-    // ✅ Check if user is verified
     if (!user.isVerified) {
       throw new ApiError(403, 'Please verify your email to access this resource.');
     }
 
-    // ✅ Attach user to request
     req.user = user;
     next();
 
   } catch (err) {
     if (err instanceof ApiError) {
-      return res.status(err.statusCode).json(new ApiResponse(err.statusCode, err.message));
+      return res.status(err.statusCode).json(
+        new ApiResponse(err.statusCode, err.message)
+      );
     }
-    return res.status(500).json(new ApiResponse(500, 'Authentication error'));
+    return res.status(500).json(
+      new ApiResponse(500, 'Authentication error')
+    );
   }
 };
 
