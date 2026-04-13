@@ -1,11 +1,33 @@
 /**
  * CallContext.jsx
  *
- * The socket singleton (socket.js) is already connected by SocketProvider.
- * We import getSocket() and call it at emit-time — this always returns
- * the connected instance regardless of React render timing.
+ * FIXES vs your original:
  *
- * Socket listeners use the same singleton directly, not React state.
+ * 1. safeEmit → waitForConnection():
+ *    Original retried once after 300ms then gave up.
+ *    New version polls every 100ms for up to 5s then does a final
+ *    socket.once('connect') so no emit is ever silently dropped.
+ *
+ * 2. call_ringing listener added:
+ *    Server emits 'call_ringing' with callId back to caller.
+ *    Original never listened for it, so stateRef.current.callId was
+ *    always null when endCall fired — server got end_call with callId:null.
+ *
+ * 3. acceptCall: capture incomingCall fields before CLEAR_INCOMING:
+ *    Original did dispatch(CLEAR_INCOMING) then read incomingCall.callType
+ *    — already null by then. Fixed by destructuring first.
+ *
+ * 4. navigate('/calls') instead of navigate(-1):
+ *    navigate(-1) goes to an arbitrary previous page (could be login).
+ *    Explicit path is predictable.
+ *
+ * 5. createPeer uses navigateRef + resetCallRef:
+ *    onconnectionstatechange closed over stale navigate/resetCall.
+ *    Refs are always current regardless of when the event fires.
+ *
+ * 6. closePeerConnection nulls event handlers before close():
+ *    Prevents onconnectionstatechange firing 'closed' and calling
+ *    resetCall a second time after we already reset.
  */
 
 import React, {
@@ -17,13 +39,14 @@ import React, {
   useCallback,
 } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getSocket } from '../socket'; // ← the already-connected singleton
+import { getSocket } from '../socket';
 
-// ─── STUN ─────────────────────────────────────────────────────────────────────
 const STUN_SERVERS = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
   ],
 };
 
@@ -34,7 +57,7 @@ const getLocalUser = () => {
 
 // ─── State ────────────────────────────────────────────────────────────────────
 const initialState = {
-  callStatus:   'idle',   // 'idle' | 'calling' | 'ringing' | 'in_call'
+  callStatus:   'idle',
   callType:     null,
   callId:       null,
   localStream:  null,
@@ -64,7 +87,6 @@ function callReducer(state, action) {
   }
 }
 
-// ─── Context ──────────────────────────────────────────────────────────────────
 const CallContext = createContext(null);
 
 export const useCall = () => {
@@ -73,7 +95,6 @@ export const useCall = () => {
   return ctx;
 };
 
-// ─── Provider ─────────────────────────────────────────────────────────────────
 export const CallProvider = ({ children }) => {
   const [state, dispatch] = useReducer(callReducer, initialState);
   const navigate = useNavigate();
@@ -83,32 +104,45 @@ export const CallProvider = ({ children }) => {
   const localStreamRef    = useRef(null);
   const durationTimerRef  = useRef(null);
   const pendingCandidates = useRef([]);
+  const navigateRef       = useRef(navigate);
+  const resetCallRef      = useRef(null);
 
-  useEffect(() => { stateRef.current = state; }, [state]);
+  useEffect(() => { stateRef.current = state; },    [state]);
+  useEffect(() => { navigateRef.current = navigate; }, [navigate]);
 
-  // ✅ Core fix: call getSocket() fresh at the moment of emit.
-  //    SocketProvider has already called s.connect() so this is always live.
-  //    Never store socket in state or a ref — just call getSocket() each time.
-  const safeEmit = useCallback((event, data) => {
+  // ── waitForConnection ──────────────────────────────────────────────────────
+  // Polls until socket.connected is true, then emits.
+  // Guarantees no event is silently dropped due to timing gaps.
+  const waitForConnection = useCallback((event, data, maxWaitMs = 5000) => {
     const s = getSocket();
-    if (!s.connected) {
-      console.warn(`[CallContext] safeEmit('${event}') — socket not connected yet, retrying in 300ms`);
-      // Retry once after a short delay (handles the rare timing gap on first load)
-      setTimeout(() => {
-        const s2 = getSocket();
-        if (s2.connected) {
-          s2.emit(event, data);
-        } else {
-          console.error(`[CallContext] safeEmit('${event}') — socket still not connected after retry`);
-        }
-      }, 300);
+
+    if (s.connected) {
+      s.emit(event, data);
       return;
     }
-    s.emit(event, data);
+
+    console.warn(`[CallContext] socket not ready, queuing '${event}'...`);
+    const started  = Date.now();
+    const interval = setInterval(() => {
+      const s2 = getSocket();
+      if (s2.connected) {
+        clearInterval(interval);
+        console.log(`[CallContext] socket ready after ${Date.now() - started}ms → emit '${event}'`);
+        s2.emit(event, data);
+      } else if (Date.now() - started >= maxWaitMs) {
+        clearInterval(interval);
+        console.warn(`[CallContext] still not connected after ${maxWaitMs}ms, attaching once-listener for '${event}'`);
+        // Last resort: emit as soon as connect fires
+        s2.once('connect', () => {
+          console.log(`[CallContext] connected (late) → emit '${event}'`);
+          s2.emit(event, data);
+        });
+        if (!s2.connected) s2.connect();
+      }
+    }, 100);
   }, []);
 
-  // ─── Helpers ──────────────────────────────────────────────────────────────
-
+  // ── Helpers ───────────────────────────────────────────────────────────────
   const stopLocalStream = useCallback(() => {
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
@@ -116,8 +150,14 @@ export const CallProvider = ({ children }) => {
   }, []);
 
   const closePeerConnection = useCallback(() => {
-    peerRef.current?.close();
-    peerRef.current = null;
+    if (peerRef.current) {
+      // Null handlers first so 'closed' state doesn't re-trigger resetCall
+      peerRef.current.onconnectionstatechange = null;
+      peerRef.current.onicecandidate          = null;
+      peerRef.current.ontrack                 = null;
+      peerRef.current.close();
+      peerRef.current = null;
+    }
   }, []);
 
   const stopDurationTimer = useCallback(() => {
@@ -128,10 +168,10 @@ export const CallProvider = ({ children }) => {
   const startDurationTimer = useCallback(() => {
     dispatch({ type: 'SET_DURATION', payload: 0 });
     let secs = 0;
-    durationTimerRef.current = setInterval(() => {
-      secs += 1;
-      dispatch({ type: 'SET_DURATION', payload: secs });
-    }, 1000);
+    durationTimerRef.current = setInterval(
+      () => dispatch({ type: 'SET_DURATION', payload: ++secs }),
+      1000
+    );
   }, []);
 
   const resetCall = useCallback(() => {
@@ -142,8 +182,10 @@ export const CallProvider = ({ children }) => {
     dispatch({ type: 'RESET' });
   }, [stopLocalStream, closePeerConnection, stopDurationTimer]);
 
-  // ─── getUserMedia ──────────────────────────────────────────────────────────
+  // Keep ref current so createPeer closure is never stale
+  useEffect(() => { resetCallRef.current = resetCall; }, [resetCall]);
 
+  // ── getUserMedia ──────────────────────────────────────────────────────────
   const getMedia = useCallback(async (callType) => {
     const constraints = callType === 'video'
       ? { audio: true, video: { width: 1280, height: 720, facingMode: 'user' } }
@@ -162,19 +204,19 @@ export const CallProvider = ({ children }) => {
     }
   }, []);
 
-  // ─── RTCPeerConnection ────────────────────────────────────────────────────
-
+  // ── RTCPeerConnection ─────────────────────────────────────────────────────
   const createPeer = useCallback((targetId) => {
     const pc = new RTCPeerConnection(STUN_SERVERS);
 
     pc.onicecandidate = (e) => {
-      if (e.candidate) safeEmit('ice_candidate', { candidate: e.candidate, targetId });
+      if (e.candidate) waitForConnection('ice_candidate', { candidate: e.candidate, targetId });
     };
 
     pc.ontrack = (e) => {
       dispatch({ type: 'SET_REMOTE_STREAM', payload: e.streams[0] });
     };
 
+    // Use refs — this closure may fire long after the component re-renders
     pc.onconnectionstatechange = () => {
       console.log('[WebRTC] connectionState:', pc.connectionState);
       if (pc.connectionState === 'connected') {
@@ -183,17 +225,16 @@ export const CallProvider = ({ children }) => {
         startDurationTimer();
       }
       if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
-        resetCall();
-        navigate(-1);
+        resetCallRef.current?.();
+        navigateRef.current('/calls');
       }
     };
 
     peerRef.current = pc;
     return pc;
-  }, [safeEmit, navigate, resetCall, startDurationTimer]);
+  }, [waitForConnection, startDurationTimer]);
 
-  // ─── INITIATE CALL ────────────────────────────────────────────────────────
-
+  // ── INITIATE CALL ─────────────────────────────────────────────────────────
   const initiateCall = useCallback(async (remoteUser, callType) => {
     if (stateRef.current.callStatus !== 'idle') return;
 
@@ -201,7 +242,15 @@ export const CallProvider = ({ children }) => {
       dispatch({ type: 'SET_CONNECTING', payload: true });
 
       const stream = await getMedia(callType);
-      const pc     = createPeer(remoteUser._id);
+
+      // Guard: another call may have started while awaiting getMedia
+      if (stateRef.current.callStatus !== 'idle' &&
+          stateRef.current.callStatus !== 'calling') {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+
+      const pc = createPeer(remoteUser._id);
       stream.getTracks().forEach((t) => pc.addTrack(t, stream));
 
       const offer = await pc.createOffer();
@@ -210,7 +259,7 @@ export const CallProvider = ({ children }) => {
       const localUser = getLocalUser();
       dispatch({ type: 'SET_CALL_META', payload: { callStatus: 'calling', callType, remoteUser } });
 
-      safeEmit('call_user', {
+      waitForConnection('call_user', {
         receiverId: remoteUser._id,
         callType,
         offer,
@@ -226,25 +275,31 @@ export const CallProvider = ({ children }) => {
       resetCall();
       alert(err.message || 'Failed to start call.');
     }
-  }, [getMedia, createPeer, safeEmit, navigate, resetCall]);
+  }, [getMedia, createPeer, waitForConnection, navigate, resetCall]);
 
-  // ─── ACCEPT CALL ──────────────────────────────────────────────────────────
-
+  // ── ACCEPT CALL ───────────────────────────────────────────────────────────
   const acceptCall = useCallback(async () => {
     const { incomingCall } = stateRef.current;
     if (!incomingCall) return;
+
+    // FIX: destructure BEFORE dispatching CLEAR_INCOMING — after that dispatch
+    // stateRef.current.incomingCall is null and these values are gone
+    const { callId, callType, caller, offer } = incomingCall;
+
     try {
       dispatch({ type: 'SET_CONNECTING', payload: true });
       dispatch({ type: 'CLEAR_INCOMING' });
 
-      const stream = await getMedia(incomingCall.callType);
-      const pc     = createPeer(incomingCall.caller._id);
+      const stream = await getMedia(callType);
+      const pc     = createPeer(caller._id);
       stream.getTracks().forEach((t) => pc.addTrack(t, stream));
 
-      await pc.setRemoteDescription(new RTCSessionDescription(incomingCall.offer));
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
 
-      for (const c of pendingCandidates.current)
-        await pc.addIceCandidate(new RTCIceCandidate(c));
+      for (const c of pendingCandidates.current) {
+        try { await pc.addIceCandidate(new RTCIceCandidate(c)); }
+        catch (e) { console.warn('[acceptCall] bad ICE candidate:', e); }
+      }
       pendingCandidates.current = [];
 
       const answer = await pc.createAnswer();
@@ -252,51 +307,38 @@ export const CallProvider = ({ children }) => {
 
       dispatch({
         type: 'SET_CALL_META',
-        payload: {
-          callStatus: 'ringing',
-          callType:   incomingCall.callType,
-          callId:     incomingCall.callId,
-          remoteUser: incomingCall.caller,
-        },
+        payload: { callStatus: 'ringing', callType, callId, remoteUser: caller },
       });
 
-      safeEmit('answer_call', {
-        callId:   incomingCall.callId,
-        answer,
-        callerId: incomingCall.caller._id,
-      });
-
+      waitForConnection('answer_call', { callId, answer, callerId: caller._id });
       navigate('/calls/active');
     } catch (err) {
       console.error('[acceptCall]', err);
       resetCall();
       alert(err.message || 'Failed to accept call.');
     }
-  }, [getMedia, createPeer, safeEmit, navigate, resetCall]);
+  }, [getMedia, createPeer, waitForConnection, navigate, resetCall]);
 
-  // ─── REJECT ───────────────────────────────────────────────────────────────
-
+  // ── REJECT ────────────────────────────────────────────────────────────────
   const rejectCall = useCallback(() => {
     const { incomingCall } = stateRef.current;
     if (!incomingCall) return;
-    safeEmit('call_rejected', {
+    waitForConnection('call_rejected', {
       callId:   incomingCall.callId,
       callerId: incomingCall.caller._id,
     });
     dispatch({ type: 'CLEAR_INCOMING' });
-  }, [safeEmit]);
+  }, [waitForConnection]);
 
-  // ─── END ──────────────────────────────────────────────────────────────────
-
+  // ── END ───────────────────────────────────────────────────────────────────
   const endCall = useCallback(() => {
     const { callId, remoteUser } = stateRef.current;
-    safeEmit('end_call', { callId, targetId: remoteUser?._id });
+    waitForConnection('end_call', { callId, targetId: remoteUser?._id });
     resetCall();
-    navigate(-1);
-  }, [safeEmit, resetCall, navigate]);
+    navigate('/calls');
+  }, [waitForConnection, resetCall, navigate]);
 
-  // ─── MUTE / VIDEO ─────────────────────────────────────────────────────────
-
+  // ── MUTE / VIDEO ──────────────────────────────────────────────────────────
   const toggleMute = useCallback(() => {
     const track = localStreamRef.current?.getAudioTracks()[0];
     if (track) { track.enabled = !track.enabled; dispatch({ type: 'TOGGLE_MUTE' }); }
@@ -307,46 +349,52 @@ export const CallProvider = ({ children }) => {
     if (track) { track.enabled = !track.enabled; dispatch({ type: 'TOGGLE_VIDEO' }); }
   }, []);
 
-  // ─── Socket listeners ─────────────────────────────────────────────────────
-  // Attach directly to the singleton — no React state dependency.
-  // This runs once on mount. getSocket() returns the same instance
-  // that SocketProvider already connected, so listeners work immediately.
-
+  // ── Socket listeners ──────────────────────────────────────────────────────
   useEffect(() => {
     const s = getSocket();
 
-    const onIncomingCall  = (data) => {
-      console.log('[CallContext] incoming_call received:', data);
+    const onIncomingCall = (data) => {
+      console.log('[CallContext] ✅ incoming_call received:', data);
       dispatch({ type: 'INCOMING_CALL', payload: data });
     };
 
-    const onCallAccepted  = async ({ callId, answer }) => {
+    // FIX: was missing — server emits call_ringing with callId so caller
+    // can store it; without this callId stays null and endCall sends null
+    const onCallRinging = ({ callId }) => {
+      console.log('[CallContext] call_ringing — callId:', callId);
+      dispatch({ type: 'SET_CALL_META', payload: { callId } });
+    };
+
+    const onCallAccepted = async ({ callId, answer }) => {
       try {
         if (!peerRef.current) return;
-        await peerRef.current.setRemoteDescription(new RTCSessionDescription(answer));
-        for (const c of pendingCandidates.current)
-          await peerRef.current.addIceCandidate(new RTCIceCandidate(c));
-        pendingCandidates.current = [];
         dispatch({ type: 'SET_CALL_META', payload: { callId } });
+        await peerRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+        for (const c of pendingCandidates.current) {
+          try { await peerRef.current.addIceCandidate(new RTCIceCandidate(c)); }
+          catch (e) { console.warn('[onCallAccepted] bad ICE candidate:', e); }
+        }
+        pendingCandidates.current = [];
       } catch (err) { console.error('[onCallAccepted]', err); }
     };
 
-    const onIceCandidate  = async ({ candidate }) => {
-      if (!peerRef.current?.remoteDescription) {
+    const onIceCandidate = async ({ candidate }) => {
+      if (!peerRef.current || !peerRef.current.remoteDescription) {
         pendingCandidates.current.push(candidate);
         return;
       }
       try { await peerRef.current.addIceCandidate(new RTCIceCandidate(candidate)); }
-      catch (err) { console.error('[onIceCandidate]', err); }
+      catch (err) { console.warn('[onIceCandidate]', err); }
     };
 
-    const onCallEnded      = () => { resetCall(); navigate(-1); };
+    const onCallEnded      = () => { resetCall(); navigate('/calls'); };
     const onCallRejected   = () => resetCall();
     const onCallUnanswered = () => resetCall();
     const onCallCancelled  = () => dispatch({ type: 'CLEAR_INCOMING' });
     const onCallError      = ({ message }) => { alert(message); resetCall(); };
 
     s.on('incoming_call',   onIncomingCall);
+    s.on('call_ringing',    onCallRinging);
     s.on('call_accepted',   onCallAccepted);
     s.on('ice_candidate',   onIceCandidate);
     s.on('call_ended',      onCallEnded);
@@ -357,6 +405,7 @@ export const CallProvider = ({ children }) => {
 
     return () => {
       s.off('incoming_call',   onIncomingCall);
+      s.off('call_ringing',    onCallRinging);
       s.off('call_accepted',   onCallAccepted);
       s.off('ice_candidate',   onIceCandidate);
       s.off('call_ended',      onCallEnded);
@@ -366,7 +415,7 @@ export const CallProvider = ({ children }) => {
       s.off('call_error',      onCallError);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // mount-only — singleton never changes
+  }, []);
 
   useEffect(() => () => resetCall(), [resetCall]);
 

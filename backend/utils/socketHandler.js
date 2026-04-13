@@ -1,8 +1,23 @@
+/**
+ * socketHandler.js
+ *
+ * FIXES:
+ * 1. _callHandlersRegistered guard — user-online can fire multiple times
+ *    on the same socket (reconnects, React StrictMode). Without this guard,
+ *    duplicate listeners stack up: call_user fires twice, DB written twice,
+ *    ICE candidates delivered twice, race conditions everywhere.
+ *
+ * 2. socket.join(normalUserId) is already here (correct) — this means
+ *    callSignalingHandler can emit to the userId room as a fallback even
+ *    if the onlineUsers map lookup fails momentarily.
+ *
+ * 3. Detailed logging — you can see exactly who is in onlineUsers at the
+ *    moment a call comes in.
+ */
+
 import User from '../models/User.js';
 import { registerCallHandlers } from './callSignalingHandler.js';
 
-// Shared map used by both chat and call handlers
-// Key: userId.toString().trim()  Value: socket.id
 export const onlineUsers = new Map();
 
 const uid = (id) => String(id || '').trim();
@@ -19,34 +34,42 @@ export const initializeSocket = (io) => {
   io.on('connection', (socket) => {
     console.log(`✅ Socket connected: ${socket.id}`);
 
-    // ─── User online ────────────────────────────────────────────────────────
+    // ─── User online ─────────────────────────────────────────────────────────
     socket.on('user-online', async (userId) => {
       const normalUserId = uid(userId);
 
-      // ✅ Attach to socket BEFORE registering call handlers
       socket.userId = normalUserId;
-
       onlineUsers.set(normalUserId, socket.id);
-      socket.join(normalUserId);
+      socket.join(normalUserId); // room named after userId — used as emit fallback
 
-      console.log(`👤 user-online: ${normalUserId} → socket ${socket.id}`);
-      console.log(`📋 onlineUsers now:`, Array.from(onlineUsers.entries()));
+      console.log(`\n👤 user-online: ${normalUserId} → socket ${socket.id}`);
+      console.log(`📋 onlineUsers (${onlineUsers.size} total):`, Array.from(onlineUsers.keys()));
 
-      await User.findByIdAndUpdate(userId, { isOnline: true });
-      await updateLastSeen(userId);
+      try {
+        await User.findByIdAndUpdate(userId, { isOnline: true });
+        await updateLastSeen(userId);
 
-      const user = await User.findById(userId).select('friends');
-      if (user?.friends) {
-        user.friends.forEach(fid => {
-          io.to(uid(fid)).emit('user_online', { userId: normalUserId, timestamp: new Date() });
-        });
+        const user = await User.findById(userId).select('friends');
+        if (user?.friends?.length) {
+          user.friends.forEach(fid => {
+            io.to(uid(fid)).emit('user_online', { userId: normalUserId, timestamp: new Date() });
+          });
+        }
+      } catch (err) {
+        console.error('[user-online] DB error:', err);
       }
 
-      // ✅ Register WebRTC call handlers AFTER socket.userId is set
-      registerCallHandlers(io, socket, onlineUsers);
+      // FIX: only register call handlers ONCE per socket instance.
+      // 'user-online' fires on every reconnect on the SAME socket object,
+      // which would stack duplicate event listeners causing double-processing.
+      if (!socket._callHandlersRegistered) {
+        socket._callHandlersRegistered = true;
+        registerCallHandlers(io, socket, onlineUsers);
+        console.log(`📞 Call handlers registered for ${normalUserId}`);
+      }
     });
 
-    // ─── Join / leave conversation rooms ────────────────────────────────────
+    // ─── Conversation rooms ───────────────────────────────────────────────────
     socket.on('join-conversation', (conversationId) => {
       socket.join(`conversation:${conversationId}`);
     });
@@ -55,7 +78,7 @@ export const initializeSocket = (io) => {
       socket.leave(`conversation:${conversationId}`);
     });
 
-    // ─── Send message ────────────────────────────────────────────────────────
+    // ─── Messages ─────────────────────────────────────────────────────────────
     socket.on('send-message', async (data) => {
       try {
         const { conversationId, senderId, content, messageId, replyTo, attachments } = data;
@@ -69,7 +92,6 @@ export const initializeSocket = (io) => {
       }
     });
 
-    // ─── Edit message ────────────────────────────────────────────────────────
     socket.on('edit-message', (data) => {
       const { conversationId, messageId, content } = data;
       socket.to(`conversation:${conversationId}`).emit('message-edited', {
@@ -77,7 +99,6 @@ export const initializeSocket = (io) => {
       });
     });
 
-    // ─── Delete message ──────────────────────────────────────────────────────
     socket.on('delete-message', (data) => {
       const { conversationId, messageId, deleteFor, deletedBy } = data;
       socket.to(`conversation:${conversationId}`).emit('message-deleted', {
@@ -85,7 +106,6 @@ export const initializeSocket = (io) => {
       });
     });
 
-    // ─── React to message ────────────────────────────────────────────────────
     socket.on('react-message', (data) => {
       const { conversationId, messageId, reactions } = data;
       socket.to(`conversation:${conversationId}`).emit('message-reacted', {
@@ -93,7 +113,6 @@ export const initializeSocket = (io) => {
       });
     });
 
-    // ─── Forward message ─────────────────────────────────────────────────────
     socket.on('forward-message', (data) => {
       const { targetConversationIds, message } = data;
       targetConversationIds.forEach((convId) => {
@@ -103,7 +122,6 @@ export const initializeSocket = (io) => {
       });
     });
 
-    // ─── Typing ──────────────────────────────────────────────────────────────
     socket.on('typing', ({ conversationId, userId }) => {
       socket.broadcast.to(`conversation:${conversationId}`).emit('user-typing', {
         conversationId, userId,
@@ -116,7 +134,7 @@ export const initializeSocket = (io) => {
       });
     });
 
-    // ─── Disconnect ──────────────────────────────────────────────────────────
+    // ─── Disconnect ───────────────────────────────────────────────────────────
     socket.on('disconnect', async () => {
       let userId;
       for (const [key, value] of onlineUsers.entries()) {
@@ -127,14 +145,21 @@ export const initializeSocket = (io) => {
 
       if (userId) {
         onlineUsers.delete(userId);
-        await User.findByIdAndUpdate(userId, { isOnline: false, lastSeen: new Date() });
-        const user = await User.findById(userId).select('friends');
-        if (user?.friends) {
-          user.friends.forEach(fid => {
-            io.to(uid(fid)).emit('user_offline', { userId, timestamp: new Date() });
-          });
+        try {
+          await User.findByIdAndUpdate(userId, { isOnline: false, lastSeen: new Date() });
+          const user = await User.findById(userId).select('friends');
+          if (user?.friends?.length) {
+            user.friends.forEach(fid => {
+              io.to(uid(fid)).emit('user_offline', { userId, timestamp: new Date() });
+            });
+          }
+        } catch (err) {
+          console.error('[disconnect] DB error:', err);
         }
       }
+
+      console.log(`📋 onlineUsers after disconnect (${onlineUsers.size}):`,
+        Array.from(onlineUsers.keys()));
     });
 
     socket.on('error', (error) => {
